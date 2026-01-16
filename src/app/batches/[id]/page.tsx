@@ -260,7 +260,7 @@ export default function BatchDetailPage() {
             <input
               id="receipt-file-input"
               type="file"
-              accept="image/*"
+              accept="image/*,.pdf"
               multiple
               disabled={adding}
               onChange={(e) => addReceipts(e.target.files)}

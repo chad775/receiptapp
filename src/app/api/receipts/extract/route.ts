@@ -26,8 +26,8 @@ export async function POST(req: Request) {
     if (!imageDataUrl || typeof imageDataUrl !== "string") {
       return Response.json({ ok: false, error: "Missing imageDataUrl" }, { status: 400 });
     }
-    if (!imageDataUrl.startsWith("data:image/")) {
-      return Response.json({ ok: false, error: "imageDataUrl must be a data:image/... base64 data URL" }, { status: 400 });
+    if (!imageDataUrl.startsWith("data:image/") && !imageDataUrl.startsWith("data:application/pdf")) {
+      return Response.json({ ok: false, error: "imageDataUrl must be a data:image/... or data:application/pdf base64 data URL" }, { status: 400 });
     }
 
     const model = "gpt-4o-mini";
@@ -56,16 +56,21 @@ export async function POST(req: Request) {
             {
               type: "input_text",
               text:
-                "Extract bookkeeping fields from this receipt image. " +
+                "Extract bookkeeping fields from this receipt image or PDF. " +
                 "Return vendor, receipt_date (YYYY-MM-DD), total (number), currency (e.g. USD), " +
                 "category_suggested (e.g. Meals, Fuel, Office Supplies, Travel, Repairs), " +
                 "and confidence (0 to 1). If missing, use null. Do not guess wildly."
             },
-            {
-              type: "input_image",
-              image_url: imageDataUrl,
-              detail: "auto"
-            }
+            imageDataUrl.startsWith("data:application/pdf") 
+              ? {
+                  type: "input_file",
+                  file_url: imageDataUrl
+                }
+              : {
+                  type: "input_image",
+                  image_url: imageDataUrl,
+                  detail: "auto"
+                }
           ]
         }
       ],
