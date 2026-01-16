@@ -79,6 +79,15 @@ export default function BatchDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
 
+  async function fileToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function addReceipts(files: FileList | null) {
     if (!files || files.length === 0) return;
 
@@ -92,28 +101,73 @@ export default function BatchDetailPage() {
       return;
     }
 
-    // For now: create placeholder receipt rows (we'll extract with OpenAI in the next step)
-    const inserts = Array.from(files).map(() => ({
-      user_id: user.id,
-      batch_id: batchId,
-      vendor: null,
-      receipt_date: null,
-      total: null,
-      category_suggested: null,
-      category_final: null,
-      confidence: null,
-      reviewed: false,
-    }));
+    try {
+      // Process each file: extract data, then insert receipt
+      for (const file of Array.from(files)) {
+        // Convert file to data URL
+        const imageDataUrl = await fileToDataUrl(file);
 
-    const { error } = await supabase.from("receipts").insert(inserts);
+        // Call extraction API
+        let extractedData = {
+          vendor: null,
+          receipt_date: null,
+          total: null,
+          category_suggested: null,
+          confidence: null,
+        };
 
-    if (error) {
-      setMsg(error.message);
-    } else {
+        try {
+          const extractResponse = await fetch("/api/receipts/extract", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ imageDataUrl }),
+          });
+
+          if (extractResponse.ok) {
+            const extractResult = await extractResponse.json();
+            if (extractResult.ok && extractResult.result) {
+              extractedData = {
+                vendor: extractResult.result.vendor,
+                receipt_date: extractResult.result.receipt_date,
+                total: extractResult.result.total,
+                category_suggested: extractResult.result.category_suggested,
+                confidence: extractResult.result.confidence,
+              };
+            }
+          } else {
+            console.error("Extraction failed for file:", file.name);
+          }
+        } catch (extractErr) {
+          console.error("Error extracting receipt:", extractErr);
+          // Continue to insert receipt even if extraction fails
+        }
+
+        // Insert receipt with extracted data
+        const { error } = await supabase.from("receipts").insert({
+          user_id: user.id,
+          batch_id: batchId,
+          vendor: extractedData.vendor,
+          receipt_date: extractedData.receipt_date,
+          total: extractedData.total,
+          category_suggested: extractedData.category_suggested,
+          category_final: null,
+          confidence: extractedData.confidence,
+          reviewed: false,
+        });
+
+        if (error) {
+          setMsg(`Error saving receipt: ${error.message}`);
+        }
+      }
+
       await load();
+    } catch (err) {
+      setMsg(`Error processing receipts: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setAdding(false);
     }
-
-    setAdding(false);
   }
 
   async function sendToAccountant() {
