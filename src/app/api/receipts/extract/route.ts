@@ -21,7 +21,7 @@ export async function POST(req: Request) {
     const imageDataUrl = body?.imageDataUrl;
 
     if (!process.env.OPENAI_API_KEY) {
-      return Response.json({ ok: false, error: "Missing OPENAI_API_KEY in .env.local" }, { status: 500 });
+      return Response.json({ ok: false, error: "Missing OPENAI_API_KEY in env" }, { status: 500 });
     }
     if (!imageDataUrl || typeof imageDataUrl !== "string") {
       return Response.json({ ok: false, error: "Missing imageDataUrl" }, { status: 400 });
@@ -61,7 +61,11 @@ export async function POST(req: Request) {
                 "category_suggested (e.g. Meals, Fuel, Office Supplies, Travel, Repairs), " +
                 "and confidence (0 to 1). If missing, use null. Do not guess wildly."
             },
-            { type: "input_image", image_url: imageDataUrl }
+            {
+              type: "input_image",
+              image_url: imageDataUrl,
+              detail: "auto"
+            }
           ]
         }
       ],
