@@ -1,17 +1,10 @@
 import OpenAI from "openai";
-import * as pdfjsLib from "pdfjs-dist";
-import { createCanvas } from "canvas";
+import pdf from "pdf-poppler";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 export const runtime = "nodejs";
-
-// Configure PDF.js worker - use disableWorker to avoid issues in serverless
-// In production, you may need to serve the worker file or use a different approach
-try {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-} catch (e) {
-  // Fallback if worker fails
-  console.warn("PDF.js worker configuration warning:", e);
-}
 
 type ExtractResult = {
   vendor: string | null;
@@ -32,26 +25,44 @@ async function pdfToImageDataUrl(pdfDataUrl: string): Promise<string> {
     const base64Data = pdfDataUrl.split(",")[1];
     const pdfBuffer = Buffer.from(base64Data, "base64");
 
-    // Load PDF document
-    const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer });
-    const pdf = await loadingTask.promise;
+    // Create temporary files
+    const tempDir = os.tmpdir();
+    const tempPdfPath = path.join(tempDir, `receipt-${Date.now()}.pdf`);
+    const tempImagePath = path.join(tempDir, `receipt-${Date.now()}.png`);
 
-    // Get first page (for receipts, usually just one page)
-    const page = await pdf.getPage(1);
+    // Write PDF buffer to temp file
+    fs.writeFileSync(tempPdfPath, pdfBuffer);
 
-    // Render page to canvas
-    const viewport = page.getViewport({ scale: 2.0 });
-    const canvas = createCanvas(viewport.width, viewport.height);
-    const context = canvas.getContext("2d");
+    // Convert PDF first page to PNG image
+    const options = {
+      format: "png",
+      out_dir: tempDir,
+      out_prefix: path.basename(tempImagePath, ".png"),
+      page: 1, // Only first page for receipts
+    };
 
-    await page.render({
-      canvasContext: context as any,
-      viewport: viewport,
-      canvas: canvas as any,
-    }).promise;
+    await pdf.convert(tempPdfPath, options);
 
-    // Convert canvas to base64 image
-    const imageDataUrl = canvas.toDataURL("image/png");
+    // pdf-poppler generates files with page number suffix: {prefix}-1.png
+    const generatedImagePath = path.join(tempDir, `${path.basename(tempImagePath, ".png")}-1.png`);
+    
+    // Read the generated image file
+    const imageBuffer = fs.readFileSync(generatedImagePath);
+
+    // Convert to base64 data URL
+    const imageBase64 = imageBuffer.toString("base64");
+    const imageDataUrl = `data:image/png;base64,${imageBase64}`;
+
+    // Clean up temporary files
+    try {
+      fs.unlinkSync(tempPdfPath);
+      if (fs.existsSync(generatedImagePath)) {
+        fs.unlinkSync(generatedImagePath);
+      }
+    } catch (cleanupError) {
+      console.warn("Failed to cleanup temp files:", cleanupError);
+    }
+
     return imageDataUrl;
   } catch (error) {
     throw new Error(`Failed to convert PDF to image: ${error instanceof Error ? error.message : String(error)}`);
