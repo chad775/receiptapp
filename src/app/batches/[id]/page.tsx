@@ -336,14 +336,14 @@ export default function BatchDetailPage() {
           >
             <h2 style={{ fontSize: 18, fontWeight: 600, color: "#30a9a0", marginBottom: 8 }}>Add Receipts</h2>
             <p style={{ marginTop: 4, color: "#666", fontSize: 14 }}>
-              Choose multiple receipt images from your computer. We'll extract vendor, date, and total automatically.
+              Choose multiple receipt images (PNG, JPG) from your computer. We'll extract vendor, date, and total automatically. PDF files should be converted to images first.
             </p>
 
             {/* Hidden file input */}
             <input
               id="receipt-file-input"
               type="file"
-              accept="image/*,.pdf"
+              accept="image/*"
               multiple
               disabled={adding}
               onChange={(e) => addReceipts(e.target.files)}

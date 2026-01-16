@@ -1,8 +1,4 @@
 import OpenAI from "openai";
-import pdf from "pdf-poppler";
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
 
 export const runtime = "nodejs";
 
@@ -19,55 +15,6 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-async function pdfToImageDataUrl(pdfDataUrl: string): Promise<string> {
-  try {
-    // Extract base64 data from data URL
-    const base64Data = pdfDataUrl.split(",")[1];
-    const pdfBuffer = Buffer.from(base64Data, "base64");
-
-    // Create temporary files
-    const tempDir = os.tmpdir();
-    const tempPdfPath = path.join(tempDir, `receipt-${Date.now()}.pdf`);
-    const tempImagePath = path.join(tempDir, `receipt-${Date.now()}.png`);
-
-    // Write PDF buffer to temp file
-    fs.writeFileSync(tempPdfPath, pdfBuffer);
-
-    // Convert PDF first page to PNG image
-    const options = {
-      format: "png",
-      out_dir: tempDir,
-      out_prefix: path.basename(tempImagePath, ".png"),
-      page: 1, // Only first page for receipts
-    };
-
-    await pdf.convert(tempPdfPath, options);
-
-    // pdf-poppler generates files with page number suffix: {prefix}-1.png
-    const generatedImagePath = path.join(tempDir, `${path.basename(tempImagePath, ".png")}-1.png`);
-    
-    // Read the generated image file
-    const imageBuffer = fs.readFileSync(generatedImagePath);
-
-    // Convert to base64 data URL
-    const imageBase64 = imageBuffer.toString("base64");
-    const imageDataUrl = `data:image/png;base64,${imageBase64}`;
-
-    // Clean up temporary files
-    try {
-      fs.unlinkSync(tempPdfPath);
-      if (fs.existsSync(generatedImagePath)) {
-        fs.unlinkSync(generatedImagePath);
-      }
-    } catch (cleanupError) {
-      console.warn("Failed to cleanup temp files:", cleanupError);
-    }
-
-    return imageDataUrl;
-  } catch (error) {
-    throw new Error(`Failed to convert PDF to image: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
 
 export async function POST(req: Request) {
   try {
@@ -87,14 +34,12 @@ export async function POST(req: Request) {
     // Convert PDF to image if needed
     let processedImageDataUrl = imageDataUrl;
     if (imageDataUrl.startsWith("data:application/pdf")) {
-      try {
-        processedImageDataUrl = await pdfToImageDataUrl(imageDataUrl);
-      } catch (pdfError) {
-        return Response.json({ 
-          ok: false, 
-          error: `Failed to process PDF: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}` 
-        }, { status: 400 });
-      }
+      // PDF processing is not available in serverless/Linux environments
+      // pdf-poppler doesn't support Linux which is used by Vercel and most serverless platforms
+      return Response.json({ 
+        ok: false, 
+        error: "PDF processing is not currently supported in this deployment environment. Please convert PDF receipts to images (PNG or JPG) before uploading. You can use an online converter or screenshot tool." 
+      }, { status: 400 });
     }
 
     const model = "gpt-4o-mini";
