@@ -29,10 +29,20 @@ export default function LoginPage() {
   return (
     <div style={{ maxWidth: 480, margin: "60px auto", padding: "40px 32px" }}>
       <div style={{ textAlign: "center", marginBottom: 32 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, color: "#003d82", marginBottom: 8 }}>
-          Boyd Group Services
-        </h1>
-        <p style={{ fontSize: 16, color: "#666", marginTop: 4 }}>
+        <img 
+          src="/logo.png" 
+          alt="Boyd Group Services" 
+          style={{ 
+            maxWidth: "300px", 
+            width: "100%", 
+            height: "auto",
+            marginBottom: 16,
+            display: "block",
+            marginLeft: "auto",
+            marginRight: "auto"
+          }}
+        />
+        <p style={{ fontSize: 16, color: "#666", marginTop: 8 }}>
           Receipt Management Portal
         </p>
       </div>
