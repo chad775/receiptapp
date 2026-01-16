@@ -1,6 +1,17 @@
 import OpenAI from "openai";
+import * as pdfjsLib from "pdfjs-dist";
+import { createCanvas } from "canvas";
 
 export const runtime = "nodejs";
+
+// Configure PDF.js worker - use disableWorker to avoid issues in serverless
+// In production, you may need to serve the worker file or use a different approach
+try {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+} catch (e) {
+  // Fallback if worker fails
+  console.warn("PDF.js worker configuration warning:", e);
+}
 
 type ExtractResult = {
   vendor: string | null;
@@ -13,6 +24,37 @@ type ExtractResult = {
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+async function pdfToImageDataUrl(pdfDataUrl: string): Promise<string> {
+  try {
+    // Extract base64 data from data URL
+    const base64Data = pdfDataUrl.split(",")[1];
+    const pdfBuffer = Buffer.from(base64Data, "base64");
+
+    // Load PDF document
+    const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer });
+    const pdf = await loadingTask.promise;
+
+    // Get first page (for receipts, usually just one page)
+    const page = await pdf.getPage(1);
+
+    // Render page to canvas
+    const viewport = page.getViewport({ scale: 2.0 });
+    const canvas = createCanvas(viewport.width, viewport.height);
+    const context = canvas.getContext("2d");
+
+    await page.render({
+      canvasContext: context as any,
+      viewport: viewport,
+    }).promise;
+
+    // Convert canvas to base64 image
+    const imageDataUrl = canvas.toDataURL("image/png");
+    return imageDataUrl;
+  } catch (error) {
+    throw new Error(`Failed to convert PDF to image: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export async function POST(req: Request) {
@@ -28,6 +70,19 @@ export async function POST(req: Request) {
     }
     if (!imageDataUrl.startsWith("data:image/") && !imageDataUrl.startsWith("data:application/pdf")) {
       return Response.json({ ok: false, error: "imageDataUrl must be a data:image/... or data:application/pdf base64 data URL" }, { status: 400 });
+    }
+
+    // Convert PDF to image if needed
+    let processedImageDataUrl = imageDataUrl;
+    if (imageDataUrl.startsWith("data:application/pdf")) {
+      try {
+        processedImageDataUrl = await pdfToImageDataUrl(imageDataUrl);
+      } catch (pdfError) {
+        return Response.json({ 
+          ok: false, 
+          error: `Failed to process PDF: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}` 
+        }, { status: 400 });
+      }
     }
 
     const model = "gpt-4o-mini";
@@ -56,21 +111,16 @@ export async function POST(req: Request) {
             {
               type: "input_text",
               text:
-                "Extract bookkeeping fields from this receipt image or PDF. " +
+                "Extract bookkeeping fields from this receipt image. " +
                 "Return vendor, receipt_date (YYYY-MM-DD), total (number), currency (e.g. USD), " +
                 "category_suggested (e.g. Meals, Fuel, Office Supplies, Travel, Repairs), " +
                 "and confidence (0 to 1). If missing, use null. Do not guess wildly."
             },
-            imageDataUrl.startsWith("data:application/pdf") 
-              ? {
-                  type: "input_file",
-                  file_url: imageDataUrl
-                }
-              : {
-                  type: "input_image",
-                  image_url: imageDataUrl,
-                  detail: "auto"
-                }
+            {
+              type: "input_image",
+              image_url: processedImageDataUrl,
+              detail: "auto"
+            }
           ]
         }
       ],

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 
 type BatchRow = {
@@ -264,6 +265,23 @@ export default function DashboardPage() {
             ))}
           </div>
         )}
+      </div>
+
+      <div style={{ marginTop: 60, paddingTop: 32, borderTop: "1px solid #e0e0e0", textAlign: "center" }}>
+        <Image 
+          src="/logo.png" 
+          alt="Boyd Group Services" 
+          width={200}
+          height={50}
+          style={{ 
+            width: "auto",
+            maxWidth: "100%", 
+            height: "auto",
+            objectFit: "contain",
+            opacity: 0.7
+          }}
+          unoptimized
+        />
       </div>
     </div>
   );

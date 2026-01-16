@@ -35,6 +35,21 @@ export default function BatchDetailPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [sending, setSending] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+
+  const categories = [
+    "Meals",
+    "Fuel",
+    "Office Supplies",
+    "Travel",
+    "Repairs",
+    "Utilities",
+    "Software",
+    "Equipment",
+    "Professional Services",
+    "Marketing",
+    "Other",
+  ];
 
   async function load() {
     setLoading(true);
@@ -167,6 +182,20 @@ export default function BatchDetailPage() {
       setMsg(`Error processing receipts: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setAdding(false);
+    }
+  }
+
+  async function updateCategory(receiptId: string, category: string) {
+    const { error } = await supabase
+      .from("receipts")
+      .update({ category_final: category || null })
+      .eq("id", receiptId);
+
+    if (error) {
+      setMsg(`Error updating category: ${error.message}`);
+    } else {
+      await load();
+      setEditingCategory(null);
     }
   }
 
@@ -400,7 +429,7 @@ export default function BatchDetailPage() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "160px 1fr 120px 140px 110px",
+                    gridTemplateColumns: "160px 1fr 120px 140px 110px 100px",
                     padding: "14px 16px",
                     fontWeight: 600,
                     background: "#f8f9fa",
@@ -414,40 +443,117 @@ export default function BatchDetailPage() {
                   <div>Total</div>
                   <div>Category</div>
                   <div>Reviewed</div>
+                  <div>Confidence</div>
                 </div>
 
-                {rows.map((r, idx) => (
-                  <div
-                    key={r.id}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "160px 1fr 120px 140px 110px",
-                      padding: "14px 16px",
-                      borderBottom: idx < rows.length - 1 ? "1px solid #f0f0f0" : "none",
-                      background: "white",
-                      fontSize: 14
-                    }}
-                  >
-                    <div style={{ color: "#1a1a1a" }}>{r.receipt_date ?? "—"}</div>
-                    <div style={{ color: "#1a1a1a" }}>{r.vendor ?? "—"}</div>
-                    <div style={{ color: "#1a1a1a", fontWeight: 600 }}>
-                      {r.total ? `$${r.total.toFixed(2)}` : "—"}
+                {rows.map((r, idx) => {
+                  const confidence = r.confidence ?? null;
+                  const confidencePercent = confidence !== null ? Math.round(confidence * 100) : null;
+                  
+                  // Color thresholds: red < 70%, yellow 70-85%, green >= 85%
+                  let confidenceColor = "#666";
+                  let confidenceBg = "transparent";
+                  if (confidencePercent !== null) {
+                    if (confidencePercent < 70) {
+                      confidenceColor = "#d32f2f"; // red
+                      confidenceBg = "#ffebee"; // light red background
+                    } else if (confidencePercent < 85) {
+                      confidenceColor = "#f57c00"; // yellow/orange
+                      confidenceBg = "#fff3e0"; // light yellow background
+                    } else {
+                      confidenceColor = "#2e7d32"; // green
+                      confidenceBg = "#e8f5e9"; // light green background
+                    }
+                  }
+                  
+                  return (
+                    <div
+                      key={r.id}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "160px 1fr 120px 140px 110px 100px",
+                        padding: "14px 16px",
+                        borderBottom: idx < rows.length - 1 ? "1px solid #f0f0f0" : "none",
+                        background: "white",
+                        fontSize: 14
+                      }}
+                    >
+                      <div style={{ color: "#1a1a1a" }}>{r.receipt_date ?? "—"}</div>
+                      <div style={{ color: "#1a1a1a" }}>{r.vendor ?? "—"}</div>
+                      <div style={{ color: "#1a1a1a", fontWeight: 600 }}>
+                        {r.total ? `$${r.total.toFixed(2)}` : "—"}
+                      </div>
+                      <div>
+                        {editingCategory === r.id ? (
+                          <select
+                            value={r.category_final ?? r.category_suggested ?? ""}
+                            onChange={(e) => updateCategory(r.id, e.target.value)}
+                            onBlur={() => setEditingCategory(null)}
+                            autoFocus
+                            style={{
+                              padding: "4px 8px",
+                              borderRadius: 4,
+                              border: "1px solid #30a9a0",
+                              fontSize: 12,
+                              minWidth: 120,
+                              cursor: "pointer"
+                            }}
+                          >
+                            <option value="">—</option>
+                            {categories.map((cat) => (
+                              <option key={cat} value={cat}>
+                                {cat}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span
+                            style={{
+                              color: "#666",
+                              cursor: "pointer",
+                              padding: "4px 8px",
+                              borderRadius: 4,
+                              display: "inline-block",
+                              minWidth: 100
+                            }}
+                            onClick={() => setEditingCategory(r.id)}
+                            title="Click to edit category"
+                          >
+                            {r.category_final ?? r.category_suggested ?? "—"}
+                          </span>
+                        )}
+                      </div>
+                      <div>
+                        <span style={{
+                          padding: "4px 8px",
+                          borderRadius: 4,
+                          background: r.reviewed ? "#e8f5e9" : "#fff3e0",
+                          color: r.reviewed ? "#2e7d32" : "#e65100",
+                          fontSize: 12,
+                          fontWeight: 600
+                        }}>
+                          {r.reviewed ? "Yes" : "No"}
+                        </span>
+                      </div>
+                      <div>
+                        {confidencePercent !== null ? (
+                          <span style={{
+                            padding: "4px 8px",
+                            borderRadius: 4,
+                            background: confidenceBg,
+                            color: confidenceColor,
+                            fontSize: 12,
+                            fontWeight: 600
+                          }}>
+                            {confidencePercent}%
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </div>
                     </div>
-                    <div style={{ color: "#666" }}>{r.category_final ?? r.category_suggested ?? "—"}</div>
-                    <div>
-                      <span style={{
-                        padding: "4px 8px",
-                        borderRadius: 4,
-                        background: r.reviewed ? "#e8f5e9" : "#fff3e0",
-                        color: r.reviewed ? "#2e7d32" : "#e65100",
-                        fontSize: 12,
-                        fontWeight: 600
-                      }}>
-                        {r.reviewed ? "Yes" : "No"}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
         </>
