@@ -27,27 +27,79 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ maxWidth: 420, margin: "40px auto", padding: 16 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700 }}>Sign in TEST 999</h1>
-      <p style={{ marginTop: 8 }}>We'll email you a magic link.</p>
+    <div style={{ maxWidth: 480, margin: "60px auto", padding: "40px 32px" }}>
+      <div style={{ textAlign: "center", marginBottom: 32 }}>
+        <h1 style={{ fontSize: 28, fontWeight: 700, color: "#003d82", marginBottom: 8 }}>
+          Boyd Group Services
+        </h1>
+        <p style={{ fontSize: 16, color: "#666", marginTop: 4 }}>
+          Receipt Management Portal
+        </p>
+      </div>
 
-      <input
-        type="email"
-        style={{ width: "100%", padding: 12, marginTop: 16 }}
-        placeholder="you@company.com"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
+      <div style={{ 
+        border: "1px solid #e0e0e0", 
+        borderRadius: 8, 
+        padding: 32, 
+        background: "#fff",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.08)"
+      }}>
+        <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 8, color: "#1a1a1a" }}>
+          Sign In
+        </h2>
+        <p style={{ marginTop: 8, color: "#666", fontSize: 14 }}>
+          Enter your email address and we'll send you a secure sign-in link.
+        </p>
 
-      <button
-        style={{ width: "100%", padding: 12, marginTop: 12 }}
-        onClick={sendMagicLink}
-        disabled={!email}
-      >
-        Send magic link
-      </button>
+        <input
+          type="email"
+          style={{ 
+            width: "100%", 
+            padding: "12px 16px", 
+            marginTop: 24,
+            border: "1px solid #e0e0e0",
+            borderRadius: 4,
+            fontSize: 14,
+            boxSizing: "border-box"
+          }}
+          placeholder="your.email@company.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
 
-      {status && <p style={{ marginTop: 12 }}>{status}</p>}
+        <button
+          style={{ 
+            width: "100%", 
+            padding: 12, 
+            marginTop: 16,
+            background: email ? "#003d82" : "#ccc",
+            color: "white",
+            border: "none",
+            borderRadius: 4,
+            fontWeight: 600,
+            fontSize: 14,
+            cursor: email ? "pointer" : "not-allowed"
+          }}
+          onClick={sendMagicLink}
+          disabled={!email}
+        >
+          Send Sign-In Link
+        </button>
+
+        {status && (
+          <div style={{ 
+            marginTop: 16, 
+            padding: 12, 
+            borderRadius: 4,
+            background: status.includes("Error") ? "#fee" : "#efe",
+            border: `1px solid ${status.includes("Error") ? "#fcc" : "#cec"}`,
+            color: status.includes("Error") ? "#c33" : "#363",
+            fontSize: 14
+          }}>
+            {status}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
