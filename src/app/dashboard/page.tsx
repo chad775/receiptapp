@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { offer } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -90,16 +89,14 @@ export default function DashboardPage() {
         .insert({
           user_id: user.id,
           name: name,
-          status: "open",
           locked: false
         })
         .select("id")
         .single();
 
       if (ins.error) throw new Error(ins.error.message);
-      const id = ins.data.id as string;
 
-      // Refresh list and navigate
+      const id = ins.data.id as string;
       await load();
       router.push("/batches/" + id);
     } catch (e: any) {
