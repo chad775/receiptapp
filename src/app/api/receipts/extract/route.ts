@@ -47,6 +47,7 @@ async function pdfToImageDataUrl(pdfDataUrl: string): Promise<string> {
     await page.render({
       canvasContext: context as any,
       viewport: viewport,
+      canvas: canvas as any,
     }).promise;
 
     // Convert canvas to base64 image
