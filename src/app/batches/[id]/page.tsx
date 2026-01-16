@@ -9,6 +9,7 @@ type Batch = {
   name: string;
   status: string;
   created_at: string;
+  locked?: boolean;
 };
 
 type ReceiptRow = {
@@ -33,6 +34,7 @@ export default function BatchDetailPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [sending, setSending] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -47,7 +49,7 @@ export default function BatchDetailPage() {
     // Load batch
     const { data: batchData, error: batchErr } = await supabase
       .from("batches")
-      .select("id,name,status,created_at")
+      .select("id,name,status,created_at,locked")
       .eq("id", batchId)
       .single();
 
@@ -114,6 +116,82 @@ export default function BatchDetailPage() {
     setAdding(false);
   }
 
+  async function sendToAccountant() {
+    if (!batch || rows.length === 0) {
+      setMsg("Please add at least one receipt before sending.");
+      return;
+    }
+
+    if (batch.locked) {
+      setMsg("This batch has already been sent to the accountant.");
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to send "${batch.name}" with ${rows.length} receipt(s) to the accountant? This will lock the batch.`)) {
+      return;
+    }
+
+    setMsg(null);
+    setSending(true);
+
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        router.replace("/login");
+        return;
+      }
+
+      // Update batch to locked
+      const { error: updateError } = await supabase
+        .from("batches")
+        .update({
+          locked: true,
+          submitted_at: new Date().toISOString(),
+          submitted_count: rows.length,
+        })
+        .eq("id", batchId);
+
+      if (updateError) {
+        setMsg(updateError.message);
+        setSending(false);
+        return;
+      }
+
+      // Get session token for API authentication
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session?.access_token) {
+        setMsg("Unable to authenticate. Please sign out and sign back in.");
+        setSending(false);
+        return;
+      }
+
+      // Send email via API
+      const response = await fetch("/api/batches/email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionData.session.access_token}`,
+        },
+        body: JSON.stringify({
+          batchId: batch.id,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setMsg(result.error || "Failed to send email. Batch was locked but email may not have been sent.");
+      } else {
+        setMsg("Batch sent successfully to the accountant!");
+        await load();
+      }
+    } catch (err) {
+      setMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <div style={{ maxWidth: 980, margin: "40px auto", padding: "0 24px" }}>
       <button 
@@ -124,7 +202,7 @@ export default function BatchDetailPage() {
           background: "white",
           border: "1px solid #e0e0e0",
           borderRadius: 4,
-          color: "#003d82",
+          color: "#30a9a0",
           fontWeight: 600,
           fontSize: 14,
           cursor: "pointer"
@@ -156,7 +234,7 @@ export default function BatchDetailPage() {
             paddingBottom: 16,
             borderBottom: "2px solid #e0e0e0"
           }}>
-            <h1 style={{ fontSize: 28, fontWeight: 700, color: "#003d82", marginBottom: 8 }}>
+            <h1 style={{ fontSize: 28, fontWeight: 700, color: "#30a9a0", marginBottom: 8 }}>
               {batch.name}
             </h1>
             <p style={{ color: "#666", fontSize: 14 }}>
@@ -173,7 +251,7 @@ export default function BatchDetailPage() {
               background: "#f8f9fa"
             }}
           >
-            <h2 style={{ fontSize: 18, fontWeight: 600, color: "#003d82", marginBottom: 8 }}>Add Receipts</h2>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: "#30a9a0", marginBottom: 8 }}>Add Receipts</h2>
             <p style={{ marginTop: 4, color: "#666", fontSize: 14 }}>
               Choose multiple receipt images from your computer. We'll extract vendor, date, and total automatically.
             </p>
@@ -201,7 +279,7 @@ export default function BatchDetailPage() {
                 padding: "12px 24px",
                 borderRadius: 4,
                 border: "none",
-                background: adding ? "#ccc" : "#003d82",
+                background: adding ? "#ccc" : "#30a9a0",
                 color: "white",
                 fontWeight: 600,
                 fontSize: 14,
@@ -216,11 +294,43 @@ export default function BatchDetailPage() {
             </p>
           </div>
 
-          <div style={{ marginTop: 32 }}>
-            <h2 style={{ fontSize: 20, fontWeight: 600, color: "#003d82", marginBottom: 16 }}>
+          <div style={{ marginTop: 32, display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 600, color: "#30a9a0" }}>
               Receipts in This Batch
             </h2>
-            {rows.length === 0 ? (
+            {rows.length > 0 && !batch.locked && (
+              <button
+                onClick={sendToAccountant}
+                disabled={sending}
+                style={{
+                  padding: "12px 24px",
+                  borderRadius: 4,
+                  border: "none",
+                  background: sending ? "#ccc" : "#30a9a0",
+                  color: "white",
+                  fontWeight: 600,
+                  fontSize: 14,
+                  cursor: sending ? "not-allowed" : "pointer",
+                }}
+              >
+                {sending ? "Sending…" : "Send to Accountant"}
+              </button>
+            )}
+            {batch.locked && (
+              <span style={{
+                padding: "8px 16px",
+                borderRadius: 4,
+                background: "#e8f5e9",
+                color: "#2e7d32",
+                fontSize: 14,
+                fontWeight: 600
+              }}>
+                ✓ Sent to Accountant
+              </span>
+            )}
+          </div>
+          
+          {rows.length === 0 ? (
               <p style={{ marginTop: 10 }}>
                 No receipts yet. Add some above.
               </p>
@@ -241,7 +351,7 @@ export default function BatchDetailPage() {
                     fontWeight: 600,
                     background: "#f8f9fa",
                     borderBottom: "2px solid #e0e0e0",
-                    color: "#003d82",
+                    color: "#30a9a0",
                     fontSize: 14
                   }}
                 >
@@ -286,7 +396,6 @@ export default function BatchDetailPage() {
                 ))}
               </div>
             )}
-          </div>
         </>
       )}
     </div>

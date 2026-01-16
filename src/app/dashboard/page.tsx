@@ -118,7 +118,7 @@ export default function DashboardPage() {
         borderBottom: "2px solid #e0e0e0"
       }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: "#003d82", marginBottom: 4 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: "#30a9a0", marginBottom: 4 }}>
             Receipt Management
           </h1>
           <p style={{ fontSize: 14, color: "#666" }}>Boyd Group Services</p>
@@ -130,7 +130,7 @@ export default function DashboardPage() {
             background: "white",
             border: "1px solid #e0e0e0",
             borderRadius: 4,
-            color: "#003d82",
+            color: "#30a9a0",
             fontWeight: 600,
             fontSize: 14,
             cursor: "pointer"
@@ -174,7 +174,7 @@ export default function DashboardPage() {
             disabled={creating} 
             style={{ 
               padding: "12px 24px",
-              background: creating ? "#ccc" : "#003d82",
+              background: creating ? "#ccc" : "#30a9a0",
               color: "white",
               border: "none",
               borderRadius: 4,
@@ -219,7 +219,7 @@ export default function DashboardPage() {
                 fontWeight: 600,
                 background: "#f8f9fa",
                 borderBottom: "2px solid #e0e0e0",
-                color: "#003d82",
+                color: "#30a9a0",
                 fontSize: 14
               }}
             >

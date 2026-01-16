@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function LoginPage() {
@@ -29,19 +30,28 @@ export default function LoginPage() {
   return (
     <div style={{ maxWidth: 480, margin: "60px auto", padding: "40px 32px" }}>
       <div style={{ textAlign: "center", marginBottom: 32 }}>
-        <img 
-          src="/logo.png" 
-          alt="Boyd Group Services" 
-          style={{ 
-            maxWidth: "300px", 
-            width: "100%", 
-            height: "auto",
-            marginBottom: 16,
-            display: "block",
-            marginLeft: "auto",
-            marginRight: "auto"
-          }}
-        />
+        <div style={{ 
+          display: "flex", 
+          justifyContent: "center", 
+          alignItems: "center",
+          marginBottom: 16,
+          minHeight: "60px"
+        }}>
+          <Image 
+            src="/logo.png" 
+            alt="Boyd Group Services" 
+            width={400}
+            height={100}
+            style={{ 
+              width: "auto",
+              maxWidth: "100%", 
+              height: "auto",
+              objectFit: "contain"
+            }}
+            unoptimized
+            priority
+          />
+        </div>
         <p style={{ fontSize: 16, color: "#666", marginTop: 8 }}>
           Receipt Management Portal
         </p>
@@ -82,7 +92,7 @@ export default function LoginPage() {
             width: "100%", 
             padding: 12, 
             marginTop: 16,
-            background: email ? "#003d82" : "#ccc",
+            background: email ? "#30a9a0" : "#ccc",
             color: "white",
             border: "none",
             borderRadius: 4,
