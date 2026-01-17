@@ -4,6 +4,19 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
+function parseHashParams(hash: string) {
+  // hash comes in like: "#access_token=...&refresh_token=...&type=magiclink"
+  const raw = hash.startsWith("#") ? hash.slice(1) : hash;
+  const params = new URLSearchParams(raw);
+  return {
+    access_token: params.get("access_token"),
+    refresh_token: params.get("refresh_token"),
+    type: params.get("type"),
+    expires_in: params.get("expires_in"),
+    token_type: params.get("token_type"),
+  };
+}
+
 export default function AuthCallbackPage() {
   const router = useRouter();
   const [msg, setMsg] = useState("Signing you in…");
@@ -13,25 +26,49 @@ export default function AuthCallbackPage() {
       const url = new URL(window.location.href);
       const code = url.searchParams.get("code");
 
-      if (!code) {
-        setMsg("Missing login code. Sending you back to login…");
+      // 1) PKCE flow: ?code=...
+      if (code) {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+        if (error) {
+          setMsg(`Login error (code exchange): ${error.message}`);
+          return;
+        }
+
+        if (data.session) {
+          router.replace("/dashboard");
+          return;
+        }
+
+        setMsg("No session created after code exchange. Redirecting to login…");
         router.replace("/login");
         return;
       }
 
-      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      // 2) Implicit flow: #access_token=...&refresh_token=...
+      if (url.hash) {
+        const { access_token, refresh_token } = parseHashParams(url.hash);
 
-      if (error) {
-        setMsg(`Login error: ${error.message}`);
-        return;
+        if (access_token && refresh_token) {
+          const { data, error } = await supabase.auth.setSession({
+            access_token,
+            refresh_token,
+          });
+
+          if (error) {
+            setMsg(`Login error (setSession): ${error.message}`);
+            return;
+          }
+
+          if (data.session) {
+            router.replace("/dashboard");
+            return;
+          }
+        }
       }
 
-      if (data.session) {
-        router.replace("/dashboard");
-      } else {
-        setMsg("No session created. Sending you back to login…");
-        router.replace("/login");
-      }
+      setMsg("No login details found. Redirecting to login…");
+      router.replace("/login");
     }
 
     finalizeLogin();
