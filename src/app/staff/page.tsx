@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -19,7 +19,7 @@ type BatchRow = {
 };
 
 function fmtDate(s: string | null): string {
-  if (!s) return "â€”";
+  if (!s) return "—";
   const d = new Date(s);
   if (isNaN(d.getTime())) return s;
   return d.toLocaleString();
@@ -64,10 +64,12 @@ export default function StaffPage() {
       return;
     }
 
+    // Staff check (role must be staff/admin)
     const memberRes = await supabase
       .from("firm_members")
       .select("firm_id,role")
       .eq("user_id", userData.user.id)
+      .in("role", ["staff", "admin"])
       .maybeSingle();
 
     if (memberRes.error) {
@@ -78,7 +80,7 @@ export default function StaffPage() {
     }
 
     if (!memberRes.data) {
-      setMsg("Access denied: staff only.");
+      setMsg("Access denied: your account is not listed as staff/admin.");
       setMember(null);
       setChecking(false);
       return;
@@ -109,7 +111,9 @@ export default function StaffPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const roleText = member ? "Role: " + member.role : "Checking access...";
+  const roleText = member
+    ? "Signed in as staff (" + member.role + ")"
+    : "Checking access...";
 
   return (
     <div style={{ maxWidth: 1100, margin: "40px auto", padding: "0 24px" }}>
@@ -198,8 +202,26 @@ export default function StaffPage() {
             Staff access required
           </h2>
           <p style={{ marginTop: 8, color: "#666", fontSize: 14 }}>
-            Add this user to <code>firm_members</code> in Supabase.
+            Add this user to <code>firm_members</code> in Supabase with role{" "}
+            <code>staff</code> or <code>admin</code>.
           </p>
+
+          <button
+            onClick={load}
+            style={{
+              marginTop: 14,
+              padding: "10px 16px",
+              background: "#30a9a0",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              fontWeight: 600,
+              fontSize: 14,
+              cursor: "pointer",
+            }}
+          >
+            Re-check access
+          </button>
         </div>
       ) : (
         <div>
@@ -336,7 +358,7 @@ export default function StaffPage() {
                     <div style={{ color: "#666", fontSize: 14 }}>
                       {typeof b.submitted_count === "number"
                         ? b.submitted_count
-                        : "â€”"}
+                        : "—"}
                     </div>
 
                     <div style={{ color: "#666", fontSize: 14 }}>
