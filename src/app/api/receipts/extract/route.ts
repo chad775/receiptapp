@@ -23,7 +23,7 @@ function stripDataUrlPrefix(dataUrl: string): { mimeType: string; base64: string
 }
 
 function normalizeBase64(b64: string): string {
-  // Remove whitespace/newlines; add padding if missing.
+  // Remove whitespace/newlines; add padding if missing
   let s = (b64 || "").replace(/\s+/g, "");
   const pad = s.length % 4;
   if (pad !== 0) s = s + "=".repeat(4 - pad);
@@ -42,8 +42,8 @@ export async function POST(req: Request) {
 
     const imageDataUrl = body?.imageDataUrl as string | undefined;
 
-    // New PDF payload (from your updated BatchDetailPage)
-    const fileBase64Raw = body?.fileBase64 as string | undefined; // base64 WITHOUT data: prefix
+    // PDF payload (from your updated BatchDetailPage)
+    const fileBase64Raw = body?.fileBase64 as string | undefined; // base64 WITHOUT data: prefix (expected)
     const fileName = body?.fileName as string | undefined;
     const mimeType = body?.mimeType as string | undefined;
 
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
         {
           ok: false,
           error:
-            "Unsupported input. Provide imageDataUrl (data:image/...;base64,...) or PDF (fileBase64 + mimeType=application/pdf).",
+            "Unsupported input. Provide imageDataUrl (data:image/...;base64,...) or PDF (fileBase64 + mimeType=application/pdf, or imageDataUrl data:application/pdf...).",
         },
         { status: 400 }
       );
@@ -92,7 +92,7 @@ export async function POST(req: Request) {
     const content: any[] = [];
 
     if (isPdfByFields || isPdfByDataUrl) {
-      // Resolve base64 PDF bytes (NO "data:" prefix)
+      // Resolve base64 PDF bytes (NO "data:" prefix in incoming payload)
       let pdfBase64 = "";
 
       if (typeof fileBase64Raw === "string" && fileBase64Raw.length > 0) {
@@ -112,38 +112,39 @@ export async function POST(req: Request) {
 
       pdfBase64 = normalizeBase64(pdfBase64);
 
-      // Guardrail: reject obviously truncated/invalid base64 early.
-      // (Your observed error usually means the base64 got truncated due to request size limits.)
+      // Guardrail: JSON body/base64 can get truncated; fail fast with a clear error.
       if (pdfBase64.length < 2000) {
         return Response.json(
           {
             ok: false,
             error:
-              "PDF base64 payload looks too small / truncated. Try a smaller PDF or upload a JPG/PNG instead.",
+              "PDF payload looks too small / truncated. Try a smaller PDF or upload a JPG/PNG instead.",
           },
           { status: 400 }
         );
       }
 
       const approxBytes = approxBytesFromBase64(pdfBase64);
-      const maxBytes = 12 * 1024 * 1024; // conservative; adjust if you want
+      const maxBytes = 12 * 1024 * 1024; // conservative for JSON/base64 transport
       if (approxBytes > maxBytes) {
         return Response.json(
           {
             ok: false,
             error: `PDF is too large (~${(approxBytes / (1024 * 1024)).toFixed(
               1
-            )}MB). Please upload a smaller PDF or an image.`,
+            )}MB) for JSON/base64 upload. Please upload a smaller PDF or an image.`,
           },
           { status: 413 }
         );
       }
 
-      // IMPORTANT: For PDF inputs, the docs show input_file first, then input_text.
+      // IMPORTANT: The OpenAI docs' Node example uses a full data URL for file_data. :contentReference[oaicite:0]{index=0}
+      const pdfDataUrl = `data:application/pdf;base64,${pdfBase64}`;
+
       content.push({
         type: "input_file",
         filename: fileName || "receipt.pdf",
-        file_data: pdfBase64,
+        file_data: pdfDataUrl,
       });
 
       content.push({
@@ -166,7 +167,6 @@ export async function POST(req: Request) {
         );
       }
 
-      // For consistency with PDFs, put the image first, then the text.
       content.push({
         type: "input_image",
         image_url: imageDataUrl,
@@ -207,10 +207,7 @@ export async function POST(req: Request) {
     try {
       parsed = JSON.parse(rawText) as ExtractResult;
     } catch {
-      return Response.json(
-        { ok: false, error: "Model returned non-JSON output", raw: rawText },
-        { status: 502 }
-      );
+      return Response.json({ ok: false, error: "Model returned non-JSON output", raw: rawText }, { status: 502 });
     }
 
     if (typeof parsed.confidence === "number") {
