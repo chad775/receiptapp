@@ -290,7 +290,9 @@ export default function DashboardPage() {
             width: "40%",
             height: "auto",
             objectFit: "contain",
-            opacity: 0.7
+            opacity: 0.7,
+            display: "block",
+            margin: "0 auto"
           }}
           unoptimized
         />
