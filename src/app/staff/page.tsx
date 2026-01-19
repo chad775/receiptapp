@@ -12,6 +12,7 @@ type FirmMemberRow = {
 type BatchRow = {
   id: string;
   name: string | null;
+  submitted_by_email: string | null;
   locked: boolean;
   submitted_at: string | null;
   submitted_count: number | null;
@@ -39,7 +40,12 @@ export default function StaffPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return batches;
-    return batches.filter((b) => (b.name ?? "").toLowerCase().includes(q));
+
+    return batches.filter((b) => {
+      const name = (b.name ?? "").toLowerCase();
+      const email = (b.submitted_by_email ?? "").toLowerCase();
+      return name.includes(q) || email.includes(q);
+    });
   }, [batches, search]);
 
   async function signOut() {
@@ -64,7 +70,6 @@ export default function StaffPage() {
       return;
     }
 
-    // Staff check (role must be staff/admin)
     const memberRes = await supabase
       .from("firm_members")
       .select("firm_id,role")
@@ -80,7 +85,7 @@ export default function StaffPage() {
     }
 
     if (!memberRes.data) {
-      setMsg("Access denied: your account is not listed as staff/admin.");
+      setMsg("Access denied: staff only.");
       setMember(null);
       setChecking(false);
       return;
@@ -92,7 +97,9 @@ export default function StaffPage() {
     setLoading(true);
     const batchesRes = await supabase
       .from("batches")
-      .select("id,name,locked,submitted_at,submitted_count,created_at")
+      .select(
+        "id,name,submitted_by_email,locked,submitted_at,submitted_count,created_at"
+      )
       .order("created_at", { ascending: false });
 
     if (batchesRes.error) {
@@ -102,7 +109,7 @@ export default function StaffPage() {
       return;
     }
 
-    setBatches(batchesRes.data ?? []);
+    setBatches((batchesRes.data ?? []) as BatchRow[]);
     setLoading(false);
   }
 
@@ -111,9 +118,7 @@ export default function StaffPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const roleText = member
-    ? "Signed in as staff (" + member.role + ")"
-    : "Checking access...";
+  const roleText = member ? "Role: " + member.role : "Checking access...";
 
   return (
     <div style={{ maxWidth: 1100, margin: "40px auto", padding: "0 24px" }}>
@@ -202,26 +207,8 @@ export default function StaffPage() {
             Staff access required
           </h2>
           <p style={{ marginTop: 8, color: "#666", fontSize: 14 }}>
-            Add this user to <code>firm_members</code> in Supabase with role{" "}
-            <code>staff</code> or <code>admin</code>.
+            Add this user to <code>firm_members</code> in Supabase.
           </p>
-
-          <button
-            onClick={load}
-            style={{
-              marginTop: 14,
-              padding: "10px 16px",
-              background: "#30a9a0",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              fontWeight: 600,
-              fontSize: 14,
-              cursor: "pointer",
-            }}
-          >
-            Re-check access
-          </button>
         </div>
       ) : (
         <div>
@@ -249,10 +236,10 @@ export default function StaffPage() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by batch name..."
+                placeholder="Search by batch name or email..."
                 style={{
                   padding: "12px 16px",
-                  width: 420,
+                  width: 520,
                   maxWidth: "100%",
                   border: "1px solid #e0e0e0",
                   borderRadius: 4,
@@ -306,7 +293,7 @@ export default function StaffPage() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 200px 140px 220px",
+                    gridTemplateColumns: "1fr 320px 160px 120px 220px",
                     padding: "14px 16px",
                     fontWeight: 600,
                     background: "#f8f9fa",
@@ -316,6 +303,7 @@ export default function StaffPage() {
                   }}
                 >
                   <div>Batch Name</div>
+                  <div>Submitted By</div>
                   <div>Status</div>
                   <div>Receipts</div>
                   <div>Created</div>
@@ -326,7 +314,7 @@ export default function StaffPage() {
                     key={b.id}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "1fr 200px 140px 220px",
+                      gridTemplateColumns: "1fr 320px 160px 120px 220px",
                       padding: "16px",
                       borderBottom:
                         idx < filtered.length - 1 ? "1px solid #f0f0f0" : "none",
@@ -335,9 +323,28 @@ export default function StaffPage() {
                       background: "white",
                     }}
                     onClick={() => router.push("/batches/" + b.id)}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background = "#f8f9fa")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.background = "white")
+                    }
                   >
                     <div style={{ fontWeight: 600, color: "#1a1a1a" }}>
                       {b.name ?? "(Untitled batch)"}
+                    </div>
+
+                    <div
+                      style={{
+                        color: "#666",
+                        fontSize: 14,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={b.submitted_by_email ?? ""}
+                    >
+                      {b.submitted_by_email ?? "—"}
                     </div>
 
                     <div style={{ color: "#666", fontSize: 14 }}>
