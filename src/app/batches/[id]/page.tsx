@@ -58,15 +58,36 @@ export default function BatchDetailPage() {
 
   const categories = [
     "Meals",
-    "Fuel",
-    "Office Supplies",
-    "Travel",
-    "Repairs",
-    "Utilities",
-    "Software",
-    "Equipment",
-    "Professional Services",
-    "Marketing",
+  "Fuel",
+  "Office Supplies",
+  "Travel",
+  "Repairs",
+
+  // Utilities & services
+  "Telephone",
+  "Internet",
+  "Utilities",
+
+  // Software & subscriptions
+  "Software",
+  "Subscriptions",
+
+  // Facilities & overhead
+  "Rent",
+  "Insurance",
+  "Equipment",
+  "Banking Fees",
+
+  // People & compliance
+  "Payroll",
+  "Training / Education",
+  "Professional Services",
+  "Taxes & Licenses",
+  "Dues & Memberships",
+
+  // Marketing
+  "Marketing",
+
     "Other",
   ];
 

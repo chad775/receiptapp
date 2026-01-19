@@ -152,7 +152,7 @@ export async function POST(req: Request) {
         text:
           "This file is a receipt (possibly a scanned PDF). Extract bookkeeping fields. " +
           "Return vendor, receipt_date (YYYY-MM-DD), total (number), currency (e.g. USD), " +
-          "category_suggested (e.g. Meals, Fuel, Office Supplies, Travel, Repairs), " +
+          "category_suggested (e.g. Meals, Fuel, Office Supplies, Travel, Repairs, Rent, Insurance, Payroll, Telephone, Internet, Utilities, Software, Subscriptions, Banking Fees, Taxes & Licenses), " +
           "and confidence (0 to 1). If missing, use null. Do not guess wildly.",
       });
     } else {
