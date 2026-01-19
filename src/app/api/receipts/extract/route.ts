@@ -15,31 +15,49 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+function stripDataUrlPrefix(dataUrl: string): { mimeType: string; base64: string } {
+  // Expected: data:<mime>;base64,<...>
+  const match = dataUrl.match(/^data:([^;]+);base64,(.*)$/);
+  if (!match) return { mimeType: "", base64: "" };
+  return { mimeType: match[1], base64: match[2] };
+}
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const imageDataUrl = body?.imageDataUrl;
+
+    const imageDataUrl = body?.imageDataUrl as string | undefined;
+    const fileBase64 = body?.fileBase64 as string | undefined; // base64 WITHOUT data: prefix
+    const fileName = body?.fileName as string | undefined;
+    const mimeType = body?.mimeType as string | undefined;
 
     if (!process.env.OPENAI_API_KEY) {
-      return Response.json({ ok: false, error: "Missing OPENAI_API_KEY in env" }, { status: 500 });
-    }
-    if (!imageDataUrl || typeof imageDataUrl !== "string") {
-      return Response.json({ ok: false, error: "Missing imageDataUrl" }, { status: 400 });
-    }
-    if (!imageDataUrl.startsWith("data:image/") && !imageDataUrl.startsWith("data:application/pdf")) {
-      return Response.json({ ok: false, error: "imageDataUrl must be a data:image/... or data:application/pdf base64 data URL" }, { status: 400 });
+      return Response.json(
+        { ok: false, error: "Missing OPENAI_API_KEY in env" },
+        { status: 500 }
+      );
     }
 
-    // Convert PDF to image if needed
-    let processedImageDataUrl = imageDataUrl;
-    if (imageDataUrl.startsWith("data:application/pdf")) {
-      // PDF processing is not available in serverless/Linux environments
-      // pdf-poppler doesn't support Linux which is used by Vercel and most serverless platforms
-      return Response.json({ 
-        ok: false, 
-        error: "PDF processing is not currently supported in this deployment environment. Please convert PDF receipts to images (PNG or JPG) before uploading. You can use an online converter or screenshot tool." 
-      }, { status: 400 });
+    // Determine if this request is an image or a PDF
+    const isPdfByFields =
+      mimeType === "application/pdf" ||
+      (typeof fileName === "string" && fileName.toLowerCase().endsWith(".pdf"));
+
+    const isPdfByDataUrl =
+      typeof imageDataUrl === "string" && imageDataUrl.startsWith("data:application/pdf");
+
+    const isImageByDataUrl =
+      typeof imageDataUrl === "string" && imageDataUrl.startsWith("data:image/");
+
+    if (!isPdfByFields && !isPdfByDataUrl && !isImageByDataUrl) {
+      return Response.json(
+        {
+          ok: false,
+          error:
+            "Missing or unsupported input. Provide imageDataUrl (data:image/...) or a PDF (fileBase64 + mimeType=application/pdf, or imageDataUrl data:application/pdf...).",
+        },
+        { status: 400 }
+      );
     }
 
     const model = "gpt-4o-mini";
@@ -54,45 +72,95 @@ export async function POST(req: Request) {
         total: { anyOf: [{ type: "number" }, { type: "null" }] },
         currency: { anyOf: [{ type: "string" }, { type: "null" }] },
         category_suggested: { anyOf: [{ type: "string" }, { type: "null" }] },
-        confidence: { anyOf: [{ type: "number" }, { type: "null" }] }
+        confidence: { anyOf: [{ type: "number" }, { type: "null" }] },
       },
-      required: ["vendor", "receipt_date", "total", "currency", "category_suggested", "confidence"]
+      required: ["vendor", "receipt_date", "total", "currency", "category_suggested", "confidence"],
     } as const;
 
+    // Build content parts
+    const content: any[] = [
+      {
+        type: "input_text",
+        text:
+          "Extract bookkeeping fields from this receipt. " +
+          "Return vendor, receipt_date (YYYY-MM-DD), total (number), currency (e.g. USD), " +
+          "category_suggested (e.g. Meals, Fuel, Office Supplies, Travel, Repairs), " +
+          "and confidence (0 to 1). If missing, use null. Do not guess wildly.",
+      },
+    ];
+
+    if (isPdfByFields || isPdfByDataUrl) {
+      // Preferred path: fileBase64 (no data: prefix) + mimeType
+      let pdfBase64 = "";
+      let resolvedFilename = fileName || "receipt.pdf";
+
+      if (typeof fileBase64 === "string" && fileBase64.length > 0) {
+        pdfBase64 = fileBase64;
+      } else if (typeof imageDataUrl === "string" && imageDataUrl.startsWith("data:application/pdf")) {
+        const parsed = stripDataUrlPrefix(imageDataUrl);
+        if (!parsed.base64) {
+          return Response.json({ ok: false, error: "Invalid PDF data URL" }, { status: 400 });
+        }
+        pdfBase64 = parsed.base64;
+        if (!resolvedFilename) resolvedFilename = "receipt.pdf";
+      } else {
+        return Response.json(
+          { ok: false, error: "Missing PDF base64 data (fileBase64 or data:application/pdf URL)" },
+          { status: 400 }
+        );
+      }
+
+      content.push({
+        type: "input_file",
+        filename: resolvedFilename,
+        file_data: pdfBase64, // base64 PDF bytes (no data: prefix)
+      });
+    } else {
+      // Image path (existing behavior)
+      if (!imageDataUrl || typeof imageDataUrl !== "string" || !imageDataUrl.startsWith("data:image/")) {
+        return Response.json({ ok: false, error: "Missing imageDataUrl" }, { status: 400 });
+      }
+
+      content.push({
+        type: "input_image",
+        image_url: imageDataUrl,
+        detail: "auto",
+      });
+    }
+
     const response = await client.responses.create({
-      model: model,
+      model,
       input: [
         {
           role: "user",
-          content: [
-            {
-              type: "input_text",
-              text:
-                "Extract bookkeeping fields from this receipt image. " +
-                "Return vendor, receipt_date (YYYY-MM-DD), total (number), currency (e.g. USD), " +
-                "category_suggested (e.g. Meals, Fuel, Office Supplies, Travel, Repairs), " +
-                "and confidence (0 to 1). If missing, use null. Do not guess wildly."
-            },
-            {
-              type: "input_image",
-              image_url: processedImageDataUrl,
-              detail: "auto"
-            }
-          ]
-        }
+          content,
+        },
       ],
       text: {
         format: {
           type: "json_schema",
           name: "receipt_extract_v1",
           strict: true,
-          schema: schema
-        }
-      }
+          schema,
+        },
+      },
     });
 
     const rawText = response.output_text || "";
-    const parsed = JSON.parse(rawText) as ExtractResult;
+
+    let parsed: ExtractResult;
+    try {
+      parsed = JSON.parse(rawText) as ExtractResult;
+    } catch {
+      return Response.json(
+        {
+          ok: false,
+          error: "Model returned non-JSON output",
+          raw: rawText,
+        },
+        { status: 502 }
+      );
+    }
 
     if (typeof parsed.confidence === "number") {
       parsed.confidence = clamp(parsed.confidence, 0, 1);
@@ -101,9 +169,12 @@ export async function POST(req: Request) {
     return Response.json({
       ok: true,
       model_used: model,
-      result: parsed
+      result: parsed,
     });
   } catch (err: any) {
-    return Response.json({ ok: false, error: err?.message ?? "Unknown error" }, { status: 500 });
+    return Response.json(
+      { ok: false, error: err?.message ?? "Unknown error" },
+      { status: 500 }
+    );
   }
 }
