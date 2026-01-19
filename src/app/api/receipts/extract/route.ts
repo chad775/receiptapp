@@ -22,23 +22,35 @@ function stripDataUrlPrefix(dataUrl: string): { mimeType: string; base64: string
   return { mimeType: match[1], base64: match[2] };
 }
 
+function normalizeBase64(b64: string): string {
+  // Remove whitespace/newlines; add padding if missing.
+  let s = (b64 || "").replace(/\s+/g, "");
+  const pad = s.length % 4;
+  if (pad !== 0) s = s + "=".repeat(4 - pad);
+  return s;
+}
+
+function approxBytesFromBase64(b64: string): number {
+  const s = normalizeBase64(b64);
+  const padding = s.endsWith("==") ? 2 : s.endsWith("=") ? 1 : 0;
+  return Math.floor((s.length * 3) / 4) - padding;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
     const imageDataUrl = body?.imageDataUrl as string | undefined;
-    const fileBase64 = body?.fileBase64 as string | undefined; // base64 WITHOUT data: prefix
+
+    // New PDF payload (from your updated BatchDetailPage)
+    const fileBase64Raw = body?.fileBase64 as string | undefined; // base64 WITHOUT data: prefix
     const fileName = body?.fileName as string | undefined;
     const mimeType = body?.mimeType as string | undefined;
 
     if (!process.env.OPENAI_API_KEY) {
-      return Response.json(
-        { ok: false, error: "Missing OPENAI_API_KEY in env" },
-        { status: 500 }
-      );
+      return Response.json({ ok: false, error: "Missing OPENAI_API_KEY in env" }, { status: 500 });
     }
 
-    // Determine if this request is an image or a PDF
     const isPdfByFields =
       mimeType === "application/pdf" ||
       (typeof fileName === "string" && fileName.toLowerCase().endsWith(".pdf"));
@@ -54,7 +66,7 @@ export async function POST(req: Request) {
         {
           ok: false,
           error:
-            "Missing or unsupported input. Provide imageDataUrl (data:image/...) or a PDF (fileBase64 + mimeType=application/pdf, or imageDataUrl data:application/pdf...).",
+            "Unsupported input. Provide imageDataUrl (data:image/...;base64,...) or PDF (fileBase64 + mimeType=application/pdf).",
         },
         { status: 400 }
       );
@@ -77,54 +89,97 @@ export async function POST(req: Request) {
       required: ["vendor", "receipt_date", "total", "currency", "category_suggested", "confidence"],
     } as const;
 
-    // Build content parts
-    const content: any[] = [
-      {
-        type: "input_text",
-        text:
-          "Extract bookkeeping fields from this receipt. " +
-          "Return vendor, receipt_date (YYYY-MM-DD), total (number), currency (e.g. USD), " +
-          "category_suggested (e.g. Meals, Fuel, Office Supplies, Travel, Repairs), " +
-          "and confidence (0 to 1). If missing, use null. Do not guess wildly.",
-      },
-    ];
+    const content: any[] = [];
 
     if (isPdfByFields || isPdfByDataUrl) {
-      // Preferred path: fileBase64 (no data: prefix) + mimeType
+      // Resolve base64 PDF bytes (NO "data:" prefix)
       let pdfBase64 = "";
-      let resolvedFilename = fileName || "receipt.pdf";
 
-      if (typeof fileBase64 === "string" && fileBase64.length > 0) {
-        pdfBase64 = fileBase64;
+      if (typeof fileBase64Raw === "string" && fileBase64Raw.length > 0) {
+        pdfBase64 = fileBase64Raw;
       } else if (typeof imageDataUrl === "string" && imageDataUrl.startsWith("data:application/pdf")) {
         const parsed = stripDataUrlPrefix(imageDataUrl);
         if (!parsed.base64) {
           return Response.json({ ok: false, error: "Invalid PDF data URL" }, { status: 400 });
         }
         pdfBase64 = parsed.base64;
-        if (!resolvedFilename) resolvedFilename = "receipt.pdf";
       } else {
         return Response.json(
-          { ok: false, error: "Missing PDF base64 data (fileBase64 or data:application/pdf URL)" },
+          { ok: false, error: "Missing PDF data. Provide fileBase64 or data:application/pdf base64 URL." },
           { status: 400 }
         );
       }
 
+      pdfBase64 = normalizeBase64(pdfBase64);
+
+      // Guardrail: reject obviously truncated/invalid base64 early.
+      // (Your observed error usually means the base64 got truncated due to request size limits.)
+      if (pdfBase64.length < 2000) {
+        return Response.json(
+          {
+            ok: false,
+            error:
+              "PDF base64 payload looks too small / truncated. Try a smaller PDF or upload a JPG/PNG instead.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const approxBytes = approxBytesFromBase64(pdfBase64);
+      const maxBytes = 12 * 1024 * 1024; // conservative; adjust if you want
+      if (approxBytes > maxBytes) {
+        return Response.json(
+          {
+            ok: false,
+            error: `PDF is too large (~${(approxBytes / (1024 * 1024)).toFixed(
+              1
+            )}MB). Please upload a smaller PDF or an image.`,
+          },
+          { status: 413 }
+        );
+      }
+
+      // IMPORTANT: For PDF inputs, the docs show input_file first, then input_text.
       content.push({
         type: "input_file",
-        filename: resolvedFilename,
-        file_data: pdfBase64, // base64 PDF bytes (no data: prefix)
+        filename: fileName || "receipt.pdf",
+        file_data: pdfBase64,
+      });
+
+      content.push({
+        type: "input_text",
+        text:
+          "This file is a receipt (possibly a scanned PDF). Extract bookkeeping fields. " +
+          "Return vendor, receipt_date (YYYY-MM-DD), total (number), currency (e.g. USD), " +
+          "category_suggested (e.g. Meals, Fuel, Office Supplies, Travel, Repairs), " +
+          "and confidence (0 to 1). If missing, use null. Do not guess wildly.",
       });
     } else {
       // Image path (existing behavior)
-      if (!imageDataUrl || typeof imageDataUrl !== "string" || !imageDataUrl.startsWith("data:image/")) {
+      if (!imageDataUrl || typeof imageDataUrl !== "string") {
         return Response.json({ ok: false, error: "Missing imageDataUrl" }, { status: 400 });
       }
+      if (!imageDataUrl.startsWith("data:image/")) {
+        return Response.json(
+          { ok: false, error: "imageDataUrl must be a data:image/... base64 data URL" },
+          { status: 400 }
+        );
+      }
 
+      // For consistency with PDFs, put the image first, then the text.
       content.push({
         type: "input_image",
         image_url: imageDataUrl,
         detail: "auto",
+      });
+
+      content.push({
+        type: "input_text",
+        text:
+          "Extract bookkeeping fields from this receipt image. " +
+          "Return vendor, receipt_date (YYYY-MM-DD), total (number), currency (e.g. USD), " +
+          "category_suggested (e.g. Meals, Fuel, Office Supplies, Travel, Repairs), " +
+          "and confidence (0 to 1). If missing, use null. Do not guess wildly.",
       });
     }
 
@@ -153,11 +208,7 @@ export async function POST(req: Request) {
       parsed = JSON.parse(rawText) as ExtractResult;
     } catch {
       return Response.json(
-        {
-          ok: false,
-          error: "Model returned non-JSON output",
-          raw: rawText,
-        },
+        { ok: false, error: "Model returned non-JSON output", raw: rawText },
         { status: 502 }
       );
     }
@@ -172,9 +223,6 @@ export async function POST(req: Request) {
       result: parsed,
     });
   } catch (err: any) {
-    return Response.json(
-      { ok: false, error: err?.message ?? "Unknown error" },
-      { status: 500 }
-    );
+    return Response.json({ ok: false, error: err?.message ?? "Unknown error" }, { status: 500 });
   }
 }
