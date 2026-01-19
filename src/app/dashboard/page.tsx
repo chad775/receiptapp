@@ -284,8 +284,8 @@ export default function DashboardPage() {
         <Image 
           src="/logo.png" 
           alt="Boyd Group Services" 
-          width={200}
-          height={50}
+          width={120}
+          height={30}
           style={{ 
             width: "auto",
             maxWidth: "100%", 
