@@ -24,6 +24,7 @@ type ReceiptRow = {
   confidence: number | null;
   reviewed: boolean;
   created_at: string;
+  note?: string | null;
 
   extracted_at?: string | null;
   extraction_source?: string | null;
@@ -54,42 +55,44 @@ export default function BatchDetailPage() {
   const [editingTotalId, setEditingTotalId] = useState<string | null>(null);
   const [totalDraft, setTotalDraft] = useState<string>("");
 
+  // Notes (Option A: only shown when category is Other)
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState<string>("");
+  const [noteErrors, setNoteErrors] = useState<Record<string, string>>({}); // receiptId -> error
+
   const firmId = process.env.NEXT_PUBLIC_FIRM_ID;
 
   const categories = [
     "Meals",
-  "Fuel",
-  "Office Supplies",
-  "Travel",
-  "Repairs",
-
-  // Utilities & services
-  "Telephone",
-  "Internet",
-  "Utilities",
-
-  // Software & subscriptions
-  "Software",
-  "Subscriptions",
-
-  // Facilities & overhead
-  "Rent",
-  "Insurance",
-  "Equipment",
-  "Banking Fees",
-
-  // People & compliance
-  "Payroll",
-  "Training / Education",
-  "Professional Services",
-  "Taxes & Licenses",
-  "Dues & Memberships",
-
-  // Marketing
-  "Marketing",
-
+    "Fuel",
+    "Office Supplies",
+    "Travel",
+    "Repairs",
+    "Telephone",
+    "Internet",
+    "Utilities",
+    "Software",
+    "Subscriptions",
+    "Rent",
+    "Insurance",
+    "Equipment",
+    "Banking Fees",
+    "Payroll",
+    "Training / Education",
+    "Professional Services",
+    "Taxes & Licenses",
+    "Dues & Memberships",
+    "Marketing",
     "Other",
   ];
+
+  function effectiveCategory(r: ReceiptRow) {
+    return (r.category_final ?? r.category_suggested ?? "").trim();
+  }
+
+  function needsOtherNote(r: ReceiptRow) {
+    return effectiveCategory(r) === "Other";
+  }
 
   async function load() {
     setLoading(true);
@@ -101,7 +104,6 @@ export default function BatchDetailPage() {
       return;
     }
 
-    // Load batch
     const { data: batchData, error: batchErr } = await supabase
       .from("batches")
       .select("id,name,status,created_at,locked,submitted_at,submitted_count")
@@ -115,17 +117,28 @@ export default function BatchDetailPage() {
     }
     setBatch(batchData);
 
-    // Load receipt rows
     const { data: rowsData, error: rowsErr } = await supabase
       .from("receipts")
       .select(
-        "id,vendor,receipt_date,total,category_suggested,category_final,confidence,reviewed,created_at,extracted_at,extraction_source,extraction_model"
+        "id,vendor,receipt_date,total,category_suggested,category_final,confidence,reviewed,created_at,extracted_at,extraction_source,extraction_model,note"
       )
       .eq("batch_id", batchId)
       .order("created_at", { ascending: false });
 
     if (rowsErr) setMsg(rowsErr.message);
-    setRows(rowsData ?? []);
+
+    const nextRows = rowsData ?? [];
+    setRows(nextRows);
+
+    // Refresh note error state deterministically
+    const errs: Record<string, string> = {};
+    for (const r of nextRows) {
+      if (needsOtherNote(r) && !String(r.note ?? "").trim()) {
+        errs[r.id] = "Required when category is Other.";
+      }
+    }
+    setNoteErrors(errs);
+
     setLoading(false);
   }
 
@@ -144,7 +157,6 @@ export default function BatchDetailPage() {
   }
 
   async function fileToBase64(file: File): Promise<string> {
-    // Returns base64 WITHOUT the data: prefix
     const dataUrl = await fileToDataUrl(file);
     const commaIdx = dataUrl.indexOf(",");
     return commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
@@ -180,9 +192,7 @@ export default function BatchDetailPage() {
 
         const maxBytes = 15 * 1024 * 1024;
         if (file.size > maxBytes) {
-          setMsg(
-            `File too large: ${file.name}. Please upload a smaller file (max ~15MB).`
-          );
+          setMsg(`File too large: ${file.name}. Please upload a smaller file (max ~15MB).`);
           continue;
         }
 
@@ -190,11 +200,7 @@ export default function BatchDetailPage() {
 
         if (isPdf) {
           const fileBase64 = await fileToBase64(file);
-          extractPayload = {
-            fileBase64,
-            fileName: file.name,
-            mimeType: "application/pdf",
-          };
+          extractPayload = { fileBase64, fileName: file.name, mimeType: "application/pdf" };
         } else {
           const imageDataUrl = await fileToDataUrl(file);
           extractPayload = { imageDataUrl };
@@ -228,22 +234,16 @@ export default function BatchDetailPage() {
                 confidence: extractResult.result.confidence,
               };
               modelUsed = extractResult.model_used ?? null;
-            } else {
-              console.error("Extraction returned not-ok:", extractResult);
             }
-          } else {
-            const errText = await extractResponse.text();
-            console.error("Extraction failed:", extractResponse.status, errText);
           }
-        } catch (extractErr) {
-          console.error("Error extracting receipt:", extractErr);
+        } catch {
+          // continue to insert even if extraction fails
         }
 
         const { error } = await supabase.from("receipts").insert({
           user_id: user.id,
           firm_id: firmId,
           batch_id: batchId,
-
           vendor: extractedData.vendor,
           receipt_date: extractedData.receipt_date,
           total: extractedData.total,
@@ -251,11 +251,11 @@ export default function BatchDetailPage() {
           category_final: null,
           confidence: extractedData.confidence,
           reviewed: false,
-
           extracted_at: new Date().toISOString(),
           extraction_source: "ai",
           extraction_model: modelUsed,
           extraction_result: extractedData,
+          note: null,
         });
 
         if (error) setMsg(`Error saving receipt: ${error.message}`);
@@ -263,11 +263,7 @@ export default function BatchDetailPage() {
 
       await load();
     } catch (err) {
-      setMsg(
-        `Error processing receipts: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      );
+      setMsg(`Error processing receipts: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setAdding(false);
     }
@@ -276,17 +272,35 @@ export default function BatchDetailPage() {
   async function updateCategory(receiptId: string, category: string) {
     if (batch?.locked) return;
 
+    const next = category || null;
+
     const { error } = await supabase
       .from("receipts")
-      .update({ category_final: category || null, extraction_source: "manual" })
+      .update({ category_final: next, extraction_source: "manual" })
       .eq("id", receiptId);
 
     if (error) {
       setMsg(`Error updating category: ${error.message}`);
-    } else {
-      await load();
-      setEditingCategory(null);
+      return;
     }
+
+    // If set to Other, mark note as required (and keep existing note if present)
+    if (next === "Other") {
+      setNoteErrors((prev) => ({
+        ...prev,
+        [receiptId]: "Required when category is Other.",
+      }));
+    } else {
+      // Not Other => clear note error + optionally clear noteDraft state
+      setNoteErrors((prev) => {
+        const copy = { ...prev };
+        delete copy[receiptId];
+        return copy;
+      });
+    }
+
+    await load();
+    setEditingCategory(null);
   }
 
   async function updateVendor(receiptId: string, vendor: string) {
@@ -295,10 +309,7 @@ export default function BatchDetailPage() {
     const trimmed = vendor.trim();
     const { error } = await supabase
       .from("receipts")
-      .update({
-        vendor: trimmed.length ? trimmed : null,
-        extraction_source: "manual",
-      })
+      .update({ vendor: trimmed.length ? trimmed : null, extraction_source: "manual" })
       .eq("id", receiptId);
 
     if (error) {
@@ -321,10 +332,7 @@ export default function BatchDetailPage() {
 
     const { error } = await supabase
       .from("receipts")
-      .update({
-        receipt_date: trimmed.length ? trimmed : null,
-        extraction_source: "manual",
-      })
+      .update({ receipt_date: trimmed.length ? trimmed : null, extraction_source: "manual" })
       .eq("id", receiptId);
 
     if (error) {
@@ -353,10 +361,7 @@ export default function BatchDetailPage() {
 
     const { error } = await supabase
       .from("receipts")
-      .update({
-        total: nextTotal,
-        extraction_source: "manual",
-      })
+      .update({ total: nextTotal, extraction_source: "manual" })
       .eq("id", receiptId);
 
     if (error) {
@@ -368,9 +373,35 @@ export default function BatchDetailPage() {
     setEditingTotalId(null);
   }
 
-  async function deleteReceipt(receiptId: string) {
+  async function updateNote(receiptId: string, note: string) {
     if (batch?.locked) return;
 
+    const trimmed = note.trim();
+    const next = trimmed.length ? trimmed.slice(0, 200) : null;
+
+    const { error } = await supabase
+      .from("receipts")
+      .update({ note: next, extraction_source: "manual" })
+      .eq("id", receiptId);
+
+    if (error) {
+      setMsg(`Error updating note: ${error.message}`);
+      return;
+    }
+
+    setNoteErrors((prev) => {
+      const copy = { ...prev };
+      if (!next) copy[receiptId] = "Required when category is Other.";
+      else delete copy[receiptId];
+      return copy;
+    });
+
+    await load();
+    setEditingNoteId(null);
+  }
+
+  async function deleteReceipt(receiptId: string) {
+    if (batch?.locked) return;
     if (!confirm("Delete this receipt row? This cannot be undone.")) return;
 
     setMsg(null);
@@ -397,14 +428,31 @@ export default function BatchDetailPage() {
     else await load();
   }
 
+  function validateOtherNotes(currentRows: ReceiptRow[]) {
+    const errs: Record<string, string> = {};
+    for (const r of currentRows) {
+      if (needsOtherNote(r) && !String(r.note ?? "").trim()) {
+        errs[r.id] = "Required when category is Other.";
+      }
+    }
+    setNoteErrors(errs);
+    return Object.keys(errs).length === 0;
+  }
+
   async function sendToAccountant() {
     if (!batch || rows.length === 0) {
       setMsg("Please add at least one receipt before sending.");
       return;
     }
-
     if (batch.locked) {
       setMsg("This batch has already been sent to the accountant.");
+      return;
+    }
+
+    // Option A: block submit if any "Other" lacks a note
+    const okNotes = validateOtherNotes(rows);
+    if (!okNotes) {
+      setMsg('Please add a description for receipts categorized as "Other".');
       return;
     }
 
@@ -426,7 +474,6 @@ export default function BatchDetailPage() {
         return;
       }
 
-      // Update batch to locked
       const { error: updateError } = await supabase
         .from("batches")
         .update({
@@ -442,7 +489,6 @@ export default function BatchDetailPage() {
         return;
       }
 
-      // Get session token for API authentication
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session?.access_token) {
         setMsg("Unable to authenticate. Please sign out and sign back in.");
@@ -450,16 +496,13 @@ export default function BatchDetailPage() {
         return;
       }
 
-      // Send email via API
       const response = await fetch("/api/batches/email", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${sessionData.session.access_token}`,
         },
-        body: JSON.stringify({
-          batchId: batch.id,
-        }),
+        body: JSON.stringify({ batchId: batch.id }),
       });
 
       const result = await response.json();
@@ -478,13 +521,6 @@ export default function BatchDetailPage() {
     } finally {
       setSending(false);
     }
-  }
-
-  function endInlineEdit() {
-    setEditingVendorId(null);
-    setEditingDateId(null);
-    setEditingTotalId(null);
-    setEditingCategory(null);
   }
 
   return (
@@ -665,9 +701,6 @@ export default function BatchDetailPage() {
                 borderRadius: 8,
                 overflow: "hidden",
               }}
-              onClick={() => {
-                // Click outside inputs shouldn't nuke edits; leave as-is.
-              }}
             >
               <div
                 style={{
@@ -711,272 +744,355 @@ export default function BatchDetailPage() {
                 }
 
                 const isLocked = !!batch.locked;
+                const cat = effectiveCategory(r);
+                const showNote = cat === "Other";
 
                 return (
-                  <div
-                    key={r.id}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "140px 1fr 120px 160px 110px 110px 90px",
-                      padding: "14px 16px",
-                      borderBottom: idx < rows.length - 1 ? "1px solid #f0f0f0" : "none",
-                      background: "white",
-                      fontSize: 14,
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    {/* Date */}
-                    <div style={{ color: "#1a1a1a" }}>
-                      {editingDateId === r.id ? (
-                        <input
-                          type="date"
-                          value={dateDraft}
-                          onChange={(e) => setDateDraft(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") updateReceiptDate(r.id, dateDraft);
-                            if (e.key === "Escape") endInlineEdit();
-                          }}
-                          onBlur={() => updateReceiptDate(r.id, dateDraft)}
-                          autoFocus
+                  <div key={r.id}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "140px 1fr 120px 160px 110px 110px 90px",
+                        padding: "14px 16px",
+                        borderBottom: showNote ? "none" : idx < rows.length - 1 ? "1px solid #f0f0f0" : "none",
+                        background: "white",
+                        fontSize: 14,
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      {/* Date (input type=date) */}
+                      <div style={{ color: "#1a1a1a" }}>
+                        {editingDateId === r.id ? (
+                          <input
+                            type="date"
+                            value={dateDraft}
+                            onChange={(e) => setDateDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") updateReceiptDate(r.id, dateDraft);
+                              if (e.key === "Escape") setEditingDateId(null);
+                            }}
+                            onBlur={() => updateReceiptDate(r.id, dateDraft)}
+                            autoFocus
+                            disabled={isLocked}
+                            style={{
+                              width: "100%",
+                              padding: "6px 8px",
+                              borderRadius: 4,
+                              border: "1px solid #30a9a0",
+                              fontSize: 12,
+                            }}
+                          />
+                        ) : (
+                          <span
+                            style={{
+                              cursor: isLocked ? "default" : "pointer",
+                              padding: "4px 8px",
+                              borderRadius: 4,
+                              display: "inline-block",
+                              minWidth: 100,
+                              color: r.receipt_date ? "#1a1a1a" : "#666",
+                            }}
+                            onClick={() => {
+                              if (isLocked) return;
+                              setEditingDateId(r.id);
+                              setDateDraft(r.receipt_date ?? "");
+                              setMsg(null);
+                            }}
+                            title={isLocked ? "" : "Click to edit date"}
+                          >
+                            {r.receipt_date ?? "—"}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Vendor */}
+                      <div style={{ color: "#1a1a1a" }}>
+                        {editingVendorId === r.id ? (
+                          <input
+                            type="text"
+                            value={vendorDraft}
+                            onChange={(e) => setVendorDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") updateVendor(r.id, vendorDraft);
+                              if (e.key === "Escape") setEditingVendorId(null);
+                            }}
+                            onBlur={() => updateVendor(r.id, vendorDraft)}
+                            autoFocus
+                            disabled={isLocked}
+                            style={{
+                              width: "100%",
+                              padding: "6px 8px",
+                              borderRadius: 4,
+                              border: "1px solid #30a9a0",
+                              fontSize: 12,
+                            }}
+                          />
+                        ) : (
+                          <span
+                            style={{
+                              cursor: isLocked ? "default" : "pointer",
+                              padding: "4px 8px",
+                              borderRadius: 4,
+                              display: "inline-block",
+                              minWidth: 120,
+                              color: r.vendor ? "#1a1a1a" : "#666",
+                            }}
+                            onClick={() => {
+                              if (isLocked) return;
+                              setEditingVendorId(r.id);
+                              setVendorDraft(r.vendor ?? "");
+                              setMsg(null);
+                            }}
+                            title={isLocked ? "" : "Click to edit vendor"}
+                          >
+                            {r.vendor ?? "—"}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Total */}
+                      <div style={{ color: "#1a1a1a", fontWeight: 600 }}>
+                        {editingTotalId === r.id ? (
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            step="0.01"
+                            value={totalDraft}
+                            onChange={(e) => setTotalDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") updateTotal(r.id, totalDraft);
+                              if (e.key === "Escape") setEditingTotalId(null);
+                            }}
+                            onBlur={() => updateTotal(r.id, totalDraft)}
+                            autoFocus
+                            disabled={isLocked}
+                            style={{
+                              width: "100%",
+                              padding: "6px 8px",
+                              borderRadius: 4,
+                              border: "1px solid #30a9a0",
+                              fontSize: 12,
+                              fontWeight: 600,
+                            }}
+                          />
+                        ) : (
+                          <span
+                            style={{
+                              cursor: isLocked ? "default" : "pointer",
+                              padding: "4px 8px",
+                              borderRadius: 4,
+                              display: "inline-block",
+                              minWidth: 90,
+                              color: typeof r.total === "number" ? "#1a1a1a" : "#666",
+                            }}
+                            onClick={() => {
+                              if (isLocked) return;
+                              setEditingTotalId(r.id);
+                              setTotalDraft(typeof r.total === "number" ? String(r.total) : "");
+                              setMsg(null);
+                            }}
+                            title={isLocked ? "" : "Click to edit total"}
+                          >
+                            {typeof r.total === "number" ? `$${r.total.toFixed(2)}` : "—"}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Category */}
+                      <div>
+                        {editingCategory === r.id ? (
+                          <select
+                            value={r.category_final ?? r.category_suggested ?? ""}
+                            onChange={(e) => updateCategory(r.id, e.target.value)}
+                            onBlur={() => setEditingCategory(null)}
+                            autoFocus
+                            disabled={isLocked}
+                            style={{
+                              padding: "6px 8px",
+                              borderRadius: 4,
+                              border: "1px solid #30a9a0",
+                              fontSize: 12,
+                              width: "100%",
+                              cursor: isLocked ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            <option value="">—</option>
+                            {categories.map((catOpt) => (
+                              <option key={catOpt} value={catOpt}>
+                                {catOpt}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span
+                            style={{
+                              color: "#666",
+                              cursor: isLocked ? "default" : "pointer",
+                              padding: "4px 8px",
+                              borderRadius: 4,
+                              display: "inline-block",
+                              minWidth: 120,
+                            }}
+                            onClick={() => {
+                              if (!isLocked) setEditingCategory(r.id);
+                            }}
+                            title={isLocked ? "" : "Click to edit category"}
+                          >
+                            {r.category_final ?? r.category_suggested ?? "—"}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Reviewed */}
+                      <div>
+                        <button
+                          onClick={() => toggleReviewed(r.id, r.reviewed)}
                           disabled={isLocked}
-                          style={{
-                            width: "100%",
-                            padding: "6px 8px",
-                            borderRadius: 4,
-                            border: "1px solid #30a9a0",
-                            fontSize: 12,
-                          }}
-                        />
-                      ) : (
-                        <span
-                          style={{
-                            cursor: isLocked ? "default" : "pointer",
-                            padding: "4px 8px",
-                            borderRadius: 4,
-                            display: "inline-block",
-                            minWidth: 100,
-                            color: r.receipt_date ? "#1a1a1a" : "#666",
-                          }}
-                          onClick={() => {
-                            if (isLocked) return;
-                            setEditingDateId(r.id);
-                            setDateDraft(r.receipt_date ?? "");
-                            setMsg(null);
-                          }}
-                          title={isLocked ? "" : "Click to edit date"}
-                        >
-                          {r.receipt_date ?? "—"}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Vendor */}
-                    <div style={{ color: "#1a1a1a" }}>
-                      {editingVendorId === r.id ? (
-                        <input
-                          type="text"
-                          value={vendorDraft}
-                          onChange={(e) => setVendorDraft(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") updateVendor(r.id, vendorDraft);
-                            if (e.key === "Escape") endInlineEdit();
-                          }}
-                          onBlur={() => updateVendor(r.id, vendorDraft)}
-                          autoFocus
-                          disabled={isLocked}
-                          style={{
-                            width: "100%",
-                            padding: "6px 8px",
-                            borderRadius: 4,
-                            border: "1px solid #30a9a0",
-                            fontSize: 12,
-                          }}
-                        />
-                      ) : (
-                        <span
-                          style={{
-                            cursor: isLocked ? "default" : "pointer",
-                            padding: "4px 8px",
-                            borderRadius: 4,
-                            display: "inline-block",
-                            minWidth: 120,
-                            color: r.vendor ? "#1a1a1a" : "#666",
-                          }}
-                          onClick={() => {
-                            if (isLocked) return;
-                            setEditingVendorId(r.id);
-                            setVendorDraft(r.vendor ?? "");
-                            setMsg(null);
-                          }}
-                          title={isLocked ? "" : "Click to edit vendor"}
-                        >
-                          {r.vendor ?? "—"}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Total */}
-                    <div style={{ color: "#1a1a1a", fontWeight: 600 }}>
-                      {editingTotalId === r.id ? (
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          value={totalDraft}
-                          onChange={(e) => setTotalDraft(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") updateTotal(r.id, totalDraft);
-                            if (e.key === "Escape") endInlineEdit();
-                          }}
-                          onBlur={() => updateTotal(r.id, totalDraft)}
-                          autoFocus
-                          disabled={isLocked}
-                          style={{
-                            width: "100%",
-                            padding: "6px 8px",
-                            borderRadius: 4,
-                            border: "1px solid #30a9a0",
-                            fontSize: 12,
-                            fontWeight: 600,
-                          }}
-                        />
-                      ) : (
-                        <span
-                          style={{
-                            cursor: isLocked ? "default" : "pointer",
-                            padding: "4px 8px",
-                            borderRadius: 4,
-                            display: "inline-block",
-                            minWidth: 90,
-                            color: typeof r.total === "number" ? "#1a1a1a" : "#666",
-                          }}
-                          onClick={() => {
-                            if (isLocked) return;
-                            setEditingTotalId(r.id);
-                            setTotalDraft(
-                              typeof r.total === "number" ? String(r.total) : ""
-                            );
-                            setMsg(null);
-                          }}
-                          title={isLocked ? "" : "Click to edit total"}
-                        >
-                          {typeof r.total === "number" ? `$${r.total.toFixed(2)}` : "—"}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Category */}
-                    <div>
-                      {editingCategory === r.id ? (
-                        <select
-                          value={r.category_final ?? r.category_suggested ?? ""}
-                          onChange={(e) => updateCategory(r.id, e.target.value)}
-                          onBlur={() => setEditingCategory(null)}
-                          autoFocus
-                          disabled={isLocked}
-                          style={{
-                            padding: "6px 8px",
-                            borderRadius: 4,
-                            border: "1px solid #30a9a0",
-                            fontSize: 12,
-                            width: "100%",
-                            cursor: isLocked ? "not-allowed" : "pointer",
-                          }}
-                        >
-                          <option value="">—</option>
-                          {categories.map((cat) => (
-                            <option key={cat} value={cat}>
-                              {cat}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span
-                          style={{
-                            color: "#666",
-                            cursor: isLocked ? "default" : "pointer",
-                            padding: "4px 8px",
-                            borderRadius: 4,
-                            display: "inline-block",
-                            minWidth: 120,
-                          }}
-                          onClick={() => {
-                            if (!isLocked) setEditingCategory(r.id);
-                          }}
-                          title={isLocked ? "" : "Click to edit category"}
-                        >
-                          {r.category_final ?? r.category_suggested ?? "—"}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Reviewed */}
-                    <div>
-                      <button
-                        onClick={() => toggleReviewed(r.id, r.reviewed)}
-                        disabled={isLocked}
-                        style={{
-                          padding: "6px 10px",
-                          borderRadius: 4,
-                          border: "none",
-                          background: r.reviewed ? "#e8f5e9" : "#fff3e0",
-                          color: r.reviewed ? "#2e7d32" : "#e65100",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: isLocked ? "not-allowed" : "pointer",
-                          width: "100%",
-                        }}
-                        title={isLocked ? "" : "Click to toggle reviewed"}
-                      >
-                        {r.reviewed ? "Yes" : "No"}
-                      </button>
-                    </div>
-
-                    {/* Confidence */}
-                    <div>
-                      {confidencePercent !== null ? (
-                        <span
                           style={{
                             padding: "6px 10px",
                             borderRadius: 4,
-                            background: confidenceBg,
-                            color: confidenceColor,
+                            border: "none",
+                            background: r.reviewed ? "#e8f5e9" : "#fff3e0",
+                            color: r.reviewed ? "#2e7d32" : "#e65100",
                             fontSize: 12,
                             fontWeight: 600,
-                            display: "inline-block",
-                            minWidth: 70,
-                            textAlign: "center",
+                            cursor: isLocked ? "not-allowed" : "pointer",
+                            width: "100%",
                           }}
+                          title={isLocked ? "" : "Click to toggle reviewed"}
                         >
-                          {confidencePercent}%
-                        </span>
-                      ) : (
-                        <span style={{ color: "#666" }}>—</span>
-                      )}
+                          {r.reviewed ? "Yes" : "No"}
+                        </button>
+                      </div>
+
+                      {/* Confidence */}
+                      <div>
+                        {confidencePercent !== null ? (
+                          <span
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 4,
+                              background: confidenceBg,
+                              color: confidenceColor,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              display: "inline-block",
+                              minWidth: 70,
+                              textAlign: "center",
+                            }}
+                          >
+                            {confidencePercent}%
+                          </span>
+                        ) : (
+                          <span style={{ color: "#666" }}>—</span>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div>
+                        <button
+                          onClick={() => deleteReceipt(r.id)}
+                          disabled={isLocked}
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: 4,
+                            border: "1px solid #e0e0e0",
+                            background: isLocked ? "#f5f5f5" : "white",
+                            color: isLocked ? "#999" : "#c33",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: isLocked ? "not-allowed" : "pointer",
+                            width: "100%",
+                          }}
+                          title={isLocked ? "" : "Delete this receipt row"}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Actions */}
-                    <div>
-                      <button
-                        onClick={() => deleteReceipt(r.id)}
-                        disabled={isLocked}
+                    {/* Option A: note row shown only when category is Other */}
+                    {showNote && (
+                      <div
                         style={{
-                          padding: "6px 10px",
-                          borderRadius: 4,
-                          border: "1px solid #e0e0e0",
-                          background: isLocked ? "#f5f5f5" : "white",
-                          color: isLocked ? "#999" : "#c33",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: isLocked ? "not-allowed" : "pointer",
-                          width: "100%",
+                          padding: "0 16px 14px 16px",
+                          borderBottom: idx < rows.length - 1 ? "1px solid #f0f0f0" : "none",
+                          background: "white",
                         }}
-                        title={isLocked ? "" : "Delete this receipt row"}
                       >
-                        Delete
-                      </button>
-                    </div>
+                        <div style={{ marginLeft: 140 + 8, marginTop: 8 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 6 }}>
+                            Describe (required)
+                          </div>
+
+                          {editingNoteId === r.id ? (
+                            <textarea
+                              value={noteDraft}
+                              onChange={(e) => setNoteDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") setEditingNoteId(null);
+                                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                                  updateNote(r.id, noteDraft);
+                                }
+                              }}
+                              onBlur={() => updateNote(r.id, noteDraft)}
+                              autoFocus
+                              disabled={isLocked}
+                              rows={2}
+                              style={{
+                                width: "100%",
+                                maxWidth: 560,
+                                padding: "8px 10px",
+                                borderRadius: 6,
+                                border: noteErrors[r.id] ? "1px solid #c33" : "1px solid #30a9a0",
+                                fontSize: 13,
+                                resize: "vertical",
+                              }}
+                              placeholder="e.g., Flowers for service / Reimbursement / Client supplies"
+                            />
+                          ) : (
+                            <div
+                              onClick={() => {
+                                if (isLocked) return;
+                                setEditingNoteId(r.id);
+                                setNoteDraft(String(r.note ?? ""));
+                                setMsg(null);
+                              }}
+                              style={{
+                                width: "100%",
+                                maxWidth: 560,
+                                minHeight: 44,
+                                padding: "8px 10px",
+                                borderRadius: 6,
+                                border: noteErrors[r.id] ? "1px solid #c33" : "1px solid #e0e0e0",
+                                background: "#fafafa",
+                                cursor: isLocked ? "default" : "pointer",
+                                fontSize: 13,
+                                color: r.note ? "#1a1a1a" : "#777",
+                                display: "flex",
+                                alignItems: "center",
+                              }}
+                              title={isLocked ? "" : "Click to add/edit description"}
+                            >
+                              {r.note?.trim()
+                                ? r.note
+                                : "Click to add a short description (required for Other)"}
+                            </div>
+                          )}
+
+                          {noteErrors[r.id] && (
+                            <div style={{ marginTop: 6, color: "#c33", fontSize: 12, fontWeight: 600 }}>
+                              {noteErrors[r.id]}
+                            </div>
+                          )}
+
+                          <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>
+                            Tip: Press Ctrl+Enter (or Cmd+Enter) to save while typing.
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
