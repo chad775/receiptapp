@@ -6,7 +6,12 @@ export const runtime = "nodejs";
 function csvEscape(value: any) {
   if (value === null || value === undefined) return "";
   const s = String(value);
-  if (s.indexOf('"') >= 0 || s.indexOf(",") >= 0 || s.indexOf("\n") >= 0 || s.indexOf("\r") >= 0) {
+  if (
+    s.indexOf('"') >= 0 ||
+    s.indexOf(",") >= 0 ||
+    s.indexOf("\n") >= 0 ||
+    s.indexOf("\r") >= 0
+  ) {
     return '"' + s.replace(/"/g, '""') + '"';
   }
   return s;
@@ -51,9 +56,9 @@ export async function POST(req: Request) {
     const supabaseUser = createClient(supabaseUrl, supabaseAnon, {
       global: {
         headers: {
-          Authorization: "Bearer " + token
-        }
-      }
+          Authorization: "Bearer " + token,
+        },
+      },
     });
 
     // Confirm token is valid
@@ -65,7 +70,9 @@ export async function POST(req: Request) {
     // Fetch receipts (RLS will ensure only their rows are returned)
     const receiptsRes = await supabaseUser
       .from("receipts")
-      .select("receipt_date,vendor,total,category_suggested,category_final,confidence,reviewed,created_at")
+      .select(
+        "receipt_date,vendor,total,category_suggested,category_final,confidence,reviewed,created_at,note"
+      )
       .eq("batch_id", batchId)
       .order("created_at", { ascending: true });
 
@@ -76,7 +83,10 @@ export async function POST(req: Request) {
     const rows = receiptsRes.data || [];
     if (rows.length === 0) {
       // This will show as a 404 in the terminal but it's not a route problem.
-      return Response.json({ ok: false, error: "No receipts found for this batch (as the signed-in user)." }, { status: 404 });
+      return Response.json(
+        { ok: false, error: "No receipts found for this batch (as the signed-in user)." },
+        { status: 404 }
+      );
     }
 
     // Optional: batch name for nicer subject/filename (also RLS protected)
@@ -87,7 +97,16 @@ export async function POST(req: Request) {
     }
 
     // Build CSV
-    const headers = ["receipt_date","vendor","total","category","confidence","reviewed","created_at"];
+    const headers = [
+      "receipt_date",
+      "vendor",
+      "total",
+      "category",
+      "note",
+      "confidence",
+      "reviewed",
+      "created_at",
+    ];
     let csv = headers.join(",") + "\n";
 
     for (const r of rows) {
@@ -97,9 +116,10 @@ export async function POST(req: Request) {
         csvEscape(r.vendor),
         csvEscape(r.total),
         csvEscape(category),
+        csvEscape((category === "Other" ? r.note : r.note) || ""), // keep note in CSV; "Other" will commonly use it
         csvEscape(r.confidence),
         csvEscape(r.reviewed),
-        csvEscape(r.created_at)
+        csvEscape(r.created_at),
       ].join(",");
       csv += line + "\n";
     }
@@ -109,7 +129,7 @@ export async function POST(req: Request) {
       host: smtpHost,
       port: Number(smtpPort),
       secure: Number(smtpPort) === 465,
-      auth: { user: smtpUser, pass: smtpPass }
+      auth: { user: smtpUser, pass: smtpPass },
     });
 
     const safeName = String(batchName).replace(/[^a-zA-Z0-9-_ ]/g, "").trim();
@@ -119,8 +139,13 @@ export async function POST(req: Request) {
       from: emailFrom,
       to: emailTo,
       subject: "Receipts CSV - " + batchName,
-      text: "Attached is the receipts CSV for batch: " + batchName + ". Receipts count: " + rows.length + ".",
-      attachments: [{ filename: filename, content: csv, contentType: "text/csv" }]
+      text:
+        "Attached is the receipts CSV for batch: " +
+        batchName +
+        ". Receipts count: " +
+        rows.length +
+        ".",
+      attachments: [{ filename: filename, content: csv, contentType: "text/csv" }],
     });
 
     console.log("Email sent:", info.messageId, "to:", emailTo, "count:", rows.length);
