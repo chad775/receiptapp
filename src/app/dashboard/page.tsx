@@ -30,6 +30,7 @@ export default function DashboardPage() {
 
   const [newName, setNewName] = useState<string>(defaultBatchName());
   const [creating, setCreating] = useState(false);
+  const firmId = process.env.NEXT_PUBLIC_FIRM_ID;
 
   async function load() {
     setLoading(true);
@@ -70,7 +71,16 @@ export default function DashboardPage() {
   async function createBatch() {
     setMsg(null);
 
+    setMsg(null);
+
+    const firmIdValue = firmId;
+    if (!firmIdValue) {
+      setMsg("Missing NEXT_PUBLIC_FIRM_ID env var.");
+      return;
+    }
+    
     const name = (newName || "").trim();
+    
     if (!name) {
       setMsg("Please enter a batch name.");
       return;
@@ -86,14 +96,17 @@ export default function DashboardPage() {
       }
 
       const ins = await supabase
-        .from("batches")
-        .insert({
-          user_id: user.id,
-          name: name,
-          locked: false
-        })
-        .select("id")
-        .single();
+  .from("batches")
+  .insert({
+    user_id: user.id,
+    firm_id: firmIdValue,
+    submitted_by_email:user.email,
+    name: name,
+    locked: false
+  })
+  .select("id")
+  .single();
+
 
       if (ins.error) throw new Error(ins.error.message);
 
