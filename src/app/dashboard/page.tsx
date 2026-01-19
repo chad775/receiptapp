@@ -287,8 +287,7 @@ export default function DashboardPage() {
           width={120}
           height={30}
           style={{ 
-            width: "auto",
-            maxWidth: "100%", 
+            width: "120px",
             height: "auto",
             objectFit: "contain",
             opacity: 0.7
