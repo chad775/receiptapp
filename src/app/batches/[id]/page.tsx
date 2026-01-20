@@ -55,7 +55,8 @@ export default function BatchDetailPage() {
 
   const [batch, setBatch] = useState<Batch | null>(null);
   const [rows, setRows] = useState<ReceiptRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+
   const [msg, setMsg] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [sending, setSending] = useState(false);
@@ -111,8 +112,11 @@ export default function BatchDetailPage() {
     return effectiveCategory(r) === "Other";
   }
 
-  async function load() {
-    setLoading(true);
+  async function load(opts?: { refresh?: boolean }) {
+    const refresh = !!opts?.refresh;
+
+    // Key change: only show full-page loading on the initial page load.
+    if (!refresh) setInitialLoading(true);
     setMsg(null);
 
     const { data: userData } = await supabase.auth.getUser();
@@ -129,7 +133,7 @@ export default function BatchDetailPage() {
 
     if (batchErr) {
       setMsg(batchErr.message);
-      setLoading(false);
+      if (!refresh) setInitialLoading(false);
       return;
     }
     setBatch(batchData);
@@ -156,11 +160,11 @@ export default function BatchDetailPage() {
     }
     setNoteErrors(errs);
 
-    setLoading(false);
+    if (!refresh) setInitialLoading(false);
   }
 
   useEffect(() => {
-    if (batchId) load();
+    if (batchId) load({ refresh: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
 
@@ -205,11 +209,14 @@ export default function BatchDetailPage() {
     try {
       for (const file of Array.from(files)) {
         const isPdf =
-          file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+          file.type === "application/pdf" ||
+          file.name.toLowerCase().endsWith(".pdf");
 
         const maxBytes = 15 * 1024 * 1024;
         if (file.size > maxBytes) {
-          setMsg(`File too large: ${file.name}. Please upload a smaller file (max ~15MB).`);
+          setMsg(
+            `File too large: ${file.name}. Please upload a smaller file (max ~15MB).`
+          );
           continue;
         }
 
@@ -217,7 +224,11 @@ export default function BatchDetailPage() {
 
         if (isPdf) {
           const fileBase64 = await fileToBase64(file);
-          extractPayload = { fileBase64, fileName: file.name, mimeType: "application/pdf" };
+          extractPayload = {
+            fileBase64,
+            fileName: file.name,
+            mimeType: "application/pdf",
+          };
         } else {
           const imageDataUrl = await fileToDataUrl(file);
           extractPayload = { imageDataUrl };
@@ -278,9 +289,13 @@ export default function BatchDetailPage() {
         if (error) setMsg(`Error saving receipt: ${error.message}`);
       }
 
-      await load();
+      await load({ refresh: true });
     } catch (err) {
-      setMsg(`Error processing receipts: ${err instanceof Error ? err.message : String(err)}`);
+      setMsg(
+        `Error processing receipts: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
     } finally {
       setAdding(false);
     }
@@ -316,7 +331,7 @@ export default function BatchDetailPage() {
       });
     }
 
-    await load();
+    await load({ refresh: true });
     setEditingCategory(null);
   }
 
@@ -326,7 +341,10 @@ export default function BatchDetailPage() {
     const trimmed = vendor.trim();
     const { error } = await supabase
       .from("receipts")
-      .update({ vendor: trimmed.length ? trimmed : null, extraction_source: "manual" })
+      .update({
+        vendor: trimmed.length ? trimmed : null,
+        extraction_source: "manual",
+      })
       .eq("id", receiptId);
 
     if (error) {
@@ -334,7 +352,7 @@ export default function BatchDetailPage() {
       return;
     }
 
-    await load();
+    await load({ refresh: true });
     setEditingVendorId(null);
   }
 
@@ -349,7 +367,10 @@ export default function BatchDetailPage() {
 
     const { error } = await supabase
       .from("receipts")
-      .update({ receipt_date: trimmed.length ? trimmed : null, extraction_source: "manual" })
+      .update({
+        receipt_date: trimmed.length ? trimmed : null,
+        extraction_source: "manual",
+      })
       .eq("id", receiptId);
 
     if (error) {
@@ -357,7 +378,7 @@ export default function BatchDetailPage() {
       return;
     }
 
-    await load();
+    await load({ refresh: true });
     setEditingDateId(null);
   }
 
@@ -386,7 +407,7 @@ export default function BatchDetailPage() {
       return;
     }
 
-    await load();
+    await load({ refresh: true });
     setEditingTotalId(null);
   }
 
@@ -413,7 +434,7 @@ export default function BatchDetailPage() {
       return copy;
     });
 
-    await load();
+    await load({ refresh: true });
     setEditingNoteId(null);
   }
 
@@ -429,7 +450,7 @@ export default function BatchDetailPage() {
       return;
     }
 
-    await load();
+    await load({ refresh: true });
   }
 
   async function toggleReviewed(receiptId: string, current: boolean) {
@@ -442,7 +463,7 @@ export default function BatchDetailPage() {
       .eq("id", receiptId);
 
     if (error) setMsg(`Error updating reviewed: ${error.message}`);
-    else await load();
+    else await load({ refresh: true });
   }
 
   function validateOtherNotes(currentRows: ReceiptRow[]) {
@@ -531,7 +552,7 @@ export default function BatchDetailPage() {
         );
       } else {
         setMsg("Batch sent successfully to the accountant!");
-        await load();
+        await load({ refresh: true });
       }
     } catch (err) {
       setMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -546,7 +567,8 @@ export default function BatchDetailPage() {
         maxWidth: 980,
         margin: isMobile ? "20px auto" : "40px auto",
         padding: isMobile ? "0 16px" : "0 24px",
-        paddingBottom: isMobile && rows.length > 0 && !batch?.locked ? "100px" : undefined,
+        paddingBottom:
+          isMobile && rows.length > 0 && !batch?.locked ? "100px" : undefined,
       }}
     >
       <button
@@ -568,7 +590,7 @@ export default function BatchDetailPage() {
         ← Back to Batches
       </button>
 
-      {loading ? (
+      {initialLoading ? (
         <p style={{ marginTop: 16, color: "#666" }}>Loading…</p>
       ) : msg ? (
         <div
@@ -647,7 +669,9 @@ export default function BatchDetailPage() {
 
             <button
               type="button"
-              onClick={() => document.getElementById("receipt-file-input")?.click()}
+              onClick={() =>
+                document.getElementById("receipt-file-input")?.click()
+              }
               disabled={adding || !!batch.locked}
               style={{
                 marginTop: 16,
@@ -663,7 +687,11 @@ export default function BatchDetailPage() {
                 minHeight: 44,
               }}
             >
-              {batch.locked ? "Batch Locked" : adding ? "Adding…" : "Choose Receipt Files"}
+              {batch.locked
+                ? "Batch Locked"
+                : adding
+                ? "Adding…"
+                : "Choose Receipt Files"}
             </button>
 
             <p style={{ marginTop: 8, color: "#666", fontSize: isMobile ? 12 : 14 }}>
@@ -734,7 +762,7 @@ export default function BatchDetailPage() {
           ) : isMobile ? (
             // Mobile: Card-based layout
             <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 16 }}>
-              {rows.map((r, idx) => {
+              {rows.map((r) => {
                 const confidence = r.confidence ?? null;
                 const confidencePercent =
                   confidence !== null ? Math.round(confidence * 100) : null;
@@ -760,33 +788,142 @@ export default function BatchDetailPage() {
 
                 return (
                   <div key={r.id}>
-                    {/* Mobile Card Layout */}
                     <div
-                        style={{
-                          border: "1px solid #e0e0e0",
-                          borderRadius: 8,
-                          background: "white",
-                          padding: 16,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 12,
-                        }}
-                      >
-                        {/* Vendor (prominent on mobile) */}
+                      style={{
+                        border: "1px solid #e0e0e0",
+                        borderRadius: 8,
+                        background: "white",
+                        padding: 16,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 12,
+                      }}
+                    >
+                      {/* Vendor */}
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 4 }}>
+                          Vendor
+                        </div>
+                        {editingVendorId === r.id ? (
+                          <input
+                            type="text"
+                            value={vendorDraft}
+                            onChange={(e) => setVendorDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") updateVendor(r.id, vendorDraft);
+                              if (e.key === "Escape") setEditingVendorId(null);
+                            }}
+                            onBlur={() => updateVendor(r.id, vendorDraft)}
+                            autoFocus
+                            disabled={isLocked}
+                            style={{
+                              width: "100%",
+                              padding: "10px 12px",
+                              borderRadius: 4,
+                              border: "1px solid #30a9a0",
+                              fontSize: 14,
+                              minHeight: 44,
+                            }}
+                          />
+                        ) : (
+                          <div
+                            onClick={() => {
+                              if (isLocked) return;
+                              setEditingVendorId(r.id);
+                              setVendorDraft(r.vendor ?? "");
+                              setMsg(null);
+                            }}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 4,
+                              border: "1px solid #e0e0e0",
+                              background: "#fafafa",
+                              cursor: isLocked ? "default" : "pointer",
+                              minHeight: 44,
+                              display: "flex",
+                              alignItems: "center",
+                              color: r.vendor ? "#1a1a1a" : "#666",
+                              fontSize: 14,
+                            }}
+                            title={isLocked ? "" : "Tap to edit vendor"}
+                          >
+                            {r.vendor ?? "—"}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Total + Date */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                         <div>
                           <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 4 }}>
-                            Vendor
+                            Total
                           </div>
-                          {editingVendorId === r.id ? (
+                          {editingTotalId === r.id ? (
                             <input
-                              type="text"
-                              value={vendorDraft}
-                              onChange={(e) => setVendorDraft(e.target.value)}
+                              type="number"
+                              inputMode="decimal"
+                              step="0.01"
+                              value={totalDraft}
+                              onChange={(e) => setTotalDraft(e.target.value)}
                               onKeyDown={(e) => {
-                                if (e.key === "Enter") updateVendor(r.id, vendorDraft);
-                                if (e.key === "Escape") setEditingVendorId(null);
+                                if (e.key === "Enter") updateTotal(r.id, totalDraft);
+                                if (e.key === "Escape") setEditingTotalId(null);
                               }}
-                              onBlur={() => updateVendor(r.id, vendorDraft)}
+                              onBlur={() => updateTotal(r.id, totalDraft)}
+                              autoFocus
+                              disabled={isLocked}
+                              style={{
+                                width: "100%",
+                                padding: "10px 12px",
+                                borderRadius: 4,
+                                border: "1px solid #30a9a0",
+                                fontSize: 14,
+                                fontWeight: 600,
+                                minHeight: 44,
+                              }}
+                            />
+                          ) : (
+                            <div
+                              onClick={() => {
+                                if (isLocked) return;
+                                setEditingTotalId(r.id);
+                                setTotalDraft(typeof r.total === "number" ? String(r.total) : "");
+                                setMsg(null);
+                              }}
+                              style={{
+                                padding: "10px 12px",
+                                borderRadius: 4,
+                                border: "1px solid #e0e0e0",
+                                background: "#fafafa",
+                                cursor: isLocked ? "default" : "pointer",
+                                minHeight: 44,
+                                display: "flex",
+                                alignItems: "center",
+                                color: typeof r.total === "number" ? "#1a1a1a" : "#666",
+                                fontSize: 14,
+                                fontWeight: 600,
+                              }}
+                              title={isLocked ? "" : "Tap to edit total"}
+                            >
+                              {typeof r.total === "number" ? `$${r.total.toFixed(2)}` : "—"}
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 4 }}>
+                            Date
+                          </div>
+                          {editingDateId === r.id ? (
+                            <input
+                              type="date"
+                              value={dateDraft}
+                              onChange={(e) => setDateDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") updateReceiptDate(r.id, dateDraft);
+                                if (e.key === "Escape") setEditingDateId(null);
+                              }}
+                              onBlur={() => updateReceiptDate(r.id, dateDraft)}
                               autoFocus
                               disabled={isLocked}
                               style={{
@@ -802,8 +939,8 @@ export default function BatchDetailPage() {
                             <div
                               onClick={() => {
                                 if (isLocked) return;
-                                setEditingVendorId(r.id);
-                                setVendorDraft(r.vendor ?? "");
+                                setEditingDateId(r.id);
+                                setDateDraft(r.receipt_date ?? "");
                                 setMsg(null);
                               }}
                               style={{
@@ -815,345 +952,231 @@ export default function BatchDetailPage() {
                                 minHeight: 44,
                                 display: "flex",
                                 alignItems: "center",
-                                color: r.vendor ? "#1a1a1a" : "#666",
+                                color: r.receipt_date ? "#1a1a1a" : "#666",
                                 fontSize: 14,
                               }}
-                              title={isLocked ? "" : "Tap to edit vendor"}
+                              title={isLocked ? "" : "Tap to edit date"}
                             >
-                              {r.vendor ?? "—"}
+                              {r.receipt_date ?? "—"}
                             </div>
                           )}
                         </div>
+                      </div>
 
-                        {/* Total, Date, Category row */}
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                          {/* Total */}
-                          <div>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 4 }}>
-                              Total
-                            </div>
-                            {editingTotalId === r.id ? (
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                step="0.01"
-                                value={totalDraft}
-                                onChange={(e) => setTotalDraft(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") updateTotal(r.id, totalDraft);
-                                  if (e.key === "Escape") setEditingTotalId(null);
-                                }}
-                                onBlur={() => updateTotal(r.id, totalDraft)}
-                                autoFocus
-                                disabled={isLocked}
-                                style={{
-                                  width: "100%",
-                                  padding: "10px 12px",
-                                  borderRadius: 4,
-                                  border: "1px solid #30a9a0",
-                                  fontSize: 14,
-                                  fontWeight: 600,
-                                  minHeight: 44,
-                                }}
-                              />
-                            ) : (
-                              <div
-                                onClick={() => {
-                                  if (isLocked) return;
-                                  setEditingTotalId(r.id);
-                                  setTotalDraft(typeof r.total === "number" ? String(r.total) : "");
-                                  setMsg(null);
-                                }}
-                                style={{
-                                  padding: "10px 12px",
-                                  borderRadius: 4,
-                                  border: "1px solid #e0e0e0",
-                                  background: "#fafafa",
-                                  cursor: isLocked ? "default" : "pointer",
-                                  minHeight: 44,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  color: typeof r.total === "number" ? "#1a1a1a" : "#666",
-                                  fontSize: 14,
-                                  fontWeight: 600,
-                                }}
-                                title={isLocked ? "" : "Tap to edit total"}
-                              >
-                                {typeof r.total === "number" ? `$${r.total.toFixed(2)}` : "—"}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Date */}
-                          <div>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 4 }}>
-                              Date
-                            </div>
-                            {editingDateId === r.id ? (
-                              <input
-                                type="date"
-                                value={dateDraft}
-                                onChange={(e) => setDateDraft(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") updateReceiptDate(r.id, dateDraft);
-                                  if (e.key === "Escape") setEditingDateId(null);
-                                }}
-                                onBlur={() => updateReceiptDate(r.id, dateDraft)}
-                                autoFocus
-                                disabled={isLocked}
-                                style={{
-                                  width: "100%",
-                                  padding: "10px 12px",
-                                  borderRadius: 4,
-                                  border: "1px solid #30a9a0",
-                                  fontSize: 14,
-                                  minHeight: 44,
-                                }}
-                              />
-                            ) : (
-                              <div
-                                onClick={() => {
-                                  if (isLocked) return;
-                                  setEditingDateId(r.id);
-                                  setDateDraft(r.receipt_date ?? "");
-                                  setMsg(null);
-                                }}
-                                style={{
-                                  padding: "10px 12px",
-                                  borderRadius: 4,
-                                  border: "1px solid #e0e0e0",
-                                  background: "#fafafa",
-                                  cursor: isLocked ? "default" : "pointer",
-                                  minHeight: 44,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  color: r.receipt_date ? "#1a1a1a" : "#666",
-                                  fontSize: 14,
-                                }}
-                                title={isLocked ? "" : "Tap to edit date"}
-                              >
-                                {r.receipt_date ?? "—"}
-                              </div>
-                            )}
-                          </div>
+                      {/* Category */}
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 4 }}>
+                          Category
                         </div>
+                        {editingCategory === r.id ? (
+                          <select
+                            value={r.category_final ?? r.category_suggested ?? ""}
+                            onChange={(e) => updateCategory(r.id, e.target.value)}
+                            onBlur={() => setEditingCategory(null)}
+                            autoFocus
+                            disabled={isLocked}
+                            style={{
+                              width: "100%",
+                              padding: "10px 12px",
+                              borderRadius: 4,
+                              border: "1px solid #30a9a0",
+                              fontSize: 14,
+                              cursor: isLocked ? "not-allowed" : "pointer",
+                              minHeight: 44,
+                              background: "white",
+                            }}
+                          >
+                            <option value="">—</option>
+                            {categories.map((catOpt) => (
+                              <option key={catOpt} value={catOpt}>
+                                {catOpt}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div
+                            onClick={() => {
+                              if (!isLocked) setEditingCategory(r.id);
+                            }}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 4,
+                              border: "1px solid #e0e0e0",
+                              background: "#fafafa",
+                              cursor: isLocked ? "default" : "pointer",
+                              minHeight: 44,
+                              display: "flex",
+                              alignItems: "center",
+                              color: "#666",
+                              fontSize: 14,
+                            }}
+                            title={isLocked ? "" : "Tap to edit category"}
+                          >
+                            {r.category_final ?? r.category_suggested ?? "—"}
+                          </div>
+                        )}
+                      </div>
 
-                        {/* Category */}
+                      {/* Confidence + Reviewed */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                         <div>
                           <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 4 }}>
-                            Category
+                            Confidence
                           </div>
-                          {editingCategory === r.id ? (
-                            <select
-                              value={r.category_final ?? r.category_suggested ?? ""}
-                              onChange={(e) => updateCategory(r.id, e.target.value)}
-                              onBlur={() => setEditingCategory(null)}
-                              autoFocus
-                              disabled={isLocked}
+                          {confidencePercent !== null ? (
+                            <div
                               style={{
-                                width: "100%",
                                 padding: "10px 12px",
                                 borderRadius: 4,
-                                border: "1px solid #30a9a0",
+                                background: confidenceBg,
+                                color: confidenceColor,
                                 fontSize: 14,
-                                cursor: isLocked ? "not-allowed" : "pointer",
+                                fontWeight: 600,
                                 minHeight: 44,
-                                background: "white",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
                               }}
                             >
-                              <option value="">—</option>
-                              {categories.map((catOpt) => (
-                                <option key={catOpt} value={catOpt}>
-                                  {catOpt}
-                                </option>
-                              ))}
-                            </select>
+                              {confidencePercent}%
+                            </div>
                           ) : (
                             <div
-                              onClick={() => {
-                                if (!isLocked) setEditingCategory(r.id);
-                              }}
                               style={{
                                 padding: "10px 12px",
                                 borderRadius: 4,
                                 border: "1px solid #e0e0e0",
                                 background: "#fafafa",
-                                cursor: isLocked ? "default" : "pointer",
+                                color: "#666",
+                                fontSize: 14,
                                 minHeight: 44,
                                 display: "flex",
                                 alignItems: "center",
-                                color: "#666",
-                                fontSize: 14,
+                                justifyContent: "center",
                               }}
-                              title={isLocked ? "" : "Tap to edit category"}
                             >
-                              {r.category_final ?? r.category_suggested ?? "—"}
+                              —
                             </div>
                           )}
                         </div>
 
-                        {/* Confidence and Reviewed row */}
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                          {/* Confidence */}
-                          <div>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 4 }}>
-                              Confidence
-                            </div>
-                            {confidencePercent !== null ? (
-                              <div
-                                style={{
-                                  padding: "10px 12px",
-                                  borderRadius: 4,
-                                  background: confidenceBg,
-                                  color: confidenceColor,
-                                  fontSize: 14,
-                                  fontWeight: 600,
-                                  minHeight: 44,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                }}
-                              >
-                                {confidencePercent}%
-                              </div>
-                            ) : (
-                              <div
-                                style={{
-                                  padding: "10px 12px",
-                                  borderRadius: 4,
-                                  border: "1px solid #e0e0e0",
-                                  background: "#fafafa",
-                                  color: "#666",
-                                  fontSize: 14,
-                                  minHeight: 44,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                }}
-                              >
-                                —
-                              </div>
-                            )}
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 4 }}>
+                            Reviewed
                           </div>
+                          <button
+                            onClick={() => toggleReviewed(r.id, r.reviewed)}
+                            disabled={isLocked}
+                            style={{
+                              width: "100%",
+                              padding: "10px 12px",
+                              borderRadius: 4,
+                              border: "none",
+                              background: r.reviewed ? "#e8f5e9" : "#fff3e0",
+                              color: r.reviewed ? "#2e7d32" : "#e65100",
+                              fontSize: 14,
+                              fontWeight: 600,
+                              cursor: isLocked ? "not-allowed" : "pointer",
+                              minHeight: 44,
+                            }}
+                            title={isLocked ? "" : "Tap to toggle reviewed"}
+                          >
+                            {r.reviewed ? "Yes" : "No"}
+                          </button>
+                        </div>
+                      </div>
 
-                          {/* Reviewed */}
-                          <div>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 4 }}>
-                              Reviewed
-                            </div>
-                            <button
-                              onClick={() => toggleReviewed(r.id, r.reviewed)}
+                      {/* Delete */}
+                      <button
+                        onClick={() => deleteReceipt(r.id)}
+                        disabled={isLocked}
+                        style={{
+                          width: "100%",
+                          padding: "12px",
+                          borderRadius: 4,
+                          border: "1px solid #e0e0e0",
+                          background: isLocked ? "#f5f5f5" : "white",
+                          color: isLocked ? "#999" : "#c33",
+                          fontSize: 14,
+                          fontWeight: 600,
+                          cursor: isLocked ? "not-allowed" : "pointer",
+                          minHeight: 44,
+                        }}
+                        title={isLocked ? "" : "Delete this receipt row"}
+                      >
+                        Delete
+                      </button>
+
+                      {/* Mobile: Other note */}
+                      {showNote && (
+                        <div style={{ marginTop: 4 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 6 }}>
+                            Describe (required)
+                          </div>
+                          {editingNoteId === r.id ? (
+                            <textarea
+                              value={noteDraft}
+                              onChange={(e) => setNoteDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") setEditingNoteId(null);
+                                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                                  updateNote(r.id, noteDraft);
+                                }
+                              }}
+                              onBlur={() => updateNote(r.id, noteDraft)}
+                              autoFocus
                               disabled={isLocked}
+                              rows={3}
                               style={{
                                 width: "100%",
                                 padding: "10px 12px",
-                                borderRadius: 4,
-                                border: "none",
-                                background: r.reviewed ? "#e8f5e9" : "#fff3e0",
-                                color: r.reviewed ? "#2e7d32" : "#e65100",
+                                borderRadius: 6,
+                                border: noteErrors[r.id] ? "1px solid #c33" : "1px solid #30a9a0",
                                 fontSize: 14,
-                                fontWeight: 600,
-                                cursor: isLocked ? "not-allowed" : "pointer",
-                                minHeight: 44,
+                                resize: "vertical",
+                                minHeight: 80,
                               }}
-                              title={isLocked ? "" : "Tap to toggle reviewed"}
+                              placeholder="e.g., Flowers for service / Reimbursement / Client supplies"
+                            />
+                          ) : (
+                            <div
+                              onClick={() => {
+                                if (isLocked) return;
+                                setEditingNoteId(r.id);
+                                setNoteDraft(String(r.note ?? ""));
+                                setMsg(null);
+                              }}
+                              style={{
+                                width: "100%",
+                                minHeight: 80,
+                                padding: "10px 12px",
+                                borderRadius: 6,
+                                border: noteErrors[r.id] ? "1px solid #c33" : "1px solid #e0e0e0",
+                                background: "#fafafa",
+                                cursor: isLocked ? "default" : "pointer",
+                                fontSize: 14,
+                                color: r.note ? "#1a1a1a" : "#777",
+                                display: "flex",
+                                alignItems: "flex-start",
+                              }}
+                              title={isLocked ? "" : "Tap to add/edit description"}
                             >
-                              {r.reviewed ? "Yes" : "No"}
-                            </button>
+                              {r.note?.trim()
+                                ? r.note
+                                : "Tap to add a short description (required for Other)"}
+                            </div>
+                          )}
+                          {noteErrors[r.id] && (
+                            <div style={{ marginTop: 6, color: "#c33", fontSize: 12, fontWeight: 600 }}>
+                              {noteErrors[r.id]}
+                            </div>
+                          )}
+                          <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>
+                            Tip: Press Ctrl+Enter (or Cmd+Enter) to save while typing.
                           </div>
                         </div>
-
-                        {/* Delete button */}
-                        <button
-                          onClick={() => deleteReceipt(r.id)}
-                          disabled={isLocked}
-                          style={{
-                            width: "100%",
-                            padding: "12px",
-                            borderRadius: 4,
-                            border: "1px solid #e0e0e0",
-                            background: isLocked ? "#f5f5f5" : "white",
-                            color: isLocked ? "#999" : "#c33",
-                            fontSize: 14,
-                            fontWeight: 600,
-                            cursor: isLocked ? "not-allowed" : "pointer",
-                            minHeight: 44,
-                          }}
-                          title={isLocked ? "" : "Delete this receipt row"}
-                        >
-                          Delete
-                        </button>
-
-                        {/* Mobile: Other note (shown inline in card) */}
-                        {showNote && (
-                          <div style={{ marginTop: 4 }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: "#444", marginBottom: 6 }}>
-                              Describe (required)
-                            </div>
-                            {editingNoteId === r.id ? (
-                              <textarea
-                                value={noteDraft}
-                                onChange={(e) => setNoteDraft(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Escape") setEditingNoteId(null);
-                                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                                    updateNote(r.id, noteDraft);
-                                  }
-                                }}
-                                onBlur={() => updateNote(r.id, noteDraft)}
-                                autoFocus
-                                disabled={isLocked}
-                                rows={3}
-                                style={{
-                                  width: "100%",
-                                  padding: "10px 12px",
-                                  borderRadius: 6,
-                                  border: noteErrors[r.id] ? "1px solid #c33" : "1px solid #30a9a0",
-                                  fontSize: 14,
-                                  resize: "vertical",
-                                  minHeight: 80,
-                                }}
-                                placeholder="e.g., Flowers for service / Reimbursement / Client supplies"
-                              />
-                            ) : (
-                              <div
-                                onClick={() => {
-                                  if (isLocked) return;
-                                  setEditingNoteId(r.id);
-                                  setNoteDraft(String(r.note ?? ""));
-                                  setMsg(null);
-                                }}
-                                style={{
-                                  width: "100%",
-                                  minHeight: 80,
-                                  padding: "10px 12px",
-                                  borderRadius: 6,
-                                  border: noteErrors[r.id] ? "1px solid #c33" : "1px solid #e0e0e0",
-                                  background: "#fafafa",
-                                  cursor: isLocked ? "default" : "pointer",
-                                  fontSize: 14,
-                                  color: r.note ? "#1a1a1a" : "#777",
-                                  display: "flex",
-                                  alignItems: "flex-start",
-                                }}
-                                title={isLocked ? "" : "Tap to add/edit description"}
-                              >
-                                {r.note?.trim()
-                                  ? r.note
-                                  : "Tap to add a short description (required for Other)"}
-                              </div>
-                            )}
-                            {noteErrors[r.id] && (
-                              <div style={{ marginTop: 6, color: "#c33", fontSize: 12, fontWeight: 600 }}>
-                                {noteErrors[r.id]}
-                              </div>
-                            )}
-                            <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>
-                              Tip: Press Ctrl+Enter (or Cmd+Enter) to save while typing.
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -1220,14 +1243,18 @@ export default function BatchDetailPage() {
                         display: "grid",
                         gridTemplateColumns: "140px 1fr 120px 160px 110px 110px 90px",
                         padding: "14px 16px",
-                        borderBottom: showNote ? "none" : idx < rows.length - 1 ? "1px solid #f0f0f0" : "none",
+                        borderBottom: showNote
+                          ? "none"
+                          : idx < rows.length - 1
+                          ? "1px solid #f0f0f0"
+                          : "none",
                         background: "white",
                         fontSize: 14,
                         alignItems: "center",
                         gap: 8,
                       }}
                     >
-                      {/* Date (input type=date) */}
+                      {/* Date */}
                       <div style={{ color: "#1a1a1a" }}>
                         {editingDateId === r.id ? (
                           <input
